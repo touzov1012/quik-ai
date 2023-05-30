@@ -6,10 +6,15 @@ class Predictor(tuning.Tunable):
         self.numeric = numeric
         self.drop = drop
     
-    
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
         config.update({
             'drop' : self._get_hp(None, 'drop', hp)
         })
         return config
+    
+    def transform(self, inputs, driver, hp):
+        if self.get_parameters(hp)['drop']:
+            return None
+        
+        return inputs
