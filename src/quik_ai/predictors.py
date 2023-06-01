@@ -1,8 +1,6 @@
 from quik_ai import tuning
 from quik_ai import layers
 
-import logging
-
 import numpy as np
 import tensorflow as tf
 
@@ -93,9 +91,7 @@ class LambdaPredictor(NumericalPredictor):
         super().__init__(name, **kwargs)
         
         if not isinstance(lambdas, (list, tuple)):
-            logging.error('Expected lambdas as a list of functions!')
-            self.lambda_count = 0
-            return
+            raise ValueError('Expected lambdas as a list of functions!')
         
         self.lambda_count = len(lambdas)
         
@@ -108,7 +104,7 @@ class LambdaPredictor(NumericalPredictor):
                 setattr(self, 'lambda_%s' % i, lbda)
                 setattr(self, 'lambda_%s_drop' % i, False)
             else:
-                logging.error('Each lambda in lambdas should be a function or a tuple of (function, boolean)')
+                raise ValueError('Each lambda in lambdas should be a function or a tuple of (function, boolean)')
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
@@ -187,7 +183,7 @@ class CategoricalPredictor(Predictor):
         input_dim = len(inputs.shape)
         
         if input_shape > 3:
-            logging.error('Categorical predictor input must be (1) dims for flat data, or (2) dims for time-series')
+            raise ValueError('Categorical predictor input must be (1) dims for flat data, or (2) dims for time-series')
         
         # flatten time series
         if input_shape == 3:
