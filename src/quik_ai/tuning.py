@@ -22,10 +22,6 @@ class HyperVariable:
         return None
 
 class HyperBoolean(HyperVariable):
-    def __init__(self, values, **kwargs):
-        super().__init__(**kwargs)
-        self.values = values
-        
     def sample(self, name, hp):
         return hp.Boolean(name, **self.kwargs)
 
