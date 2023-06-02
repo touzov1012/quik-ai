@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 from keras import backend
 from keras.engine import base_layer
 from keras.utils import control_flow_util
@@ -33,5 +35,34 @@ class CategoricalDropout(base_layer.BaseRandomLayer):
             'dropout' : self.dropout,
             'dropout_token' : self.dropout_token,
             'seed' : self.seed,
+        })
+        return config
+
+class ResNetBlock(tf.keras.layers.Layer):
+    
+    def __init__(self, activation, dropout, projection_scale, **kwargs):
+        super().__init__(**kwargs)
+        
+        self.activation = activation
+        self.dropout = dropout
+        self.projection_scale = projection_scale
+    
+    def build(self, input_shape):
+        self.norm = tf.keras.layers.LayerNormalization(epsilon=1e-5)
+        self.ffn = tf.keras.Sequential([
+            tf.keras.layers.Dense(units=self.projection_scale * input_shape[-1], activation=self.activation),
+            tf.keras.layers.Dense(units=input_shape[-1]),
+            tf.keras.layers.Dropout(rate=self.dropout),
+        ])
+    
+    def call(self, inputs):
+        return inputs + self.ffn(self.norm(inputs))
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'activation' : self.activation,
+            'dropout' : self.dropout,
+            'projection_scale' : self.projection_scale,
         })
         return config

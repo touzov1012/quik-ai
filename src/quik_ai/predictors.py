@@ -21,7 +21,7 @@ class Predictor(tuning.Tunable):
         if self.get_parameters(hp)['drop']:
             return None
         
-        outputs = [driver.get_input_layer(name) for name in self.names]
+        outputs = driver.get_input_layers(self.names)
         
         return tf.concat(outputs, axis=-1)
 
@@ -66,7 +66,7 @@ class LambdaPredictor(Predictor):
         if self.lambda_count == 0:
             return None
         
-        outputs = [driver.get_input_layer(name) for name in self.names]
+        outputs = driver.get_input_layers(self.names)
         
         res = []
         for i in range(self.lambda_count):
