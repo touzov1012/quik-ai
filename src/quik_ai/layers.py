@@ -38,6 +38,63 @@ class CategoricalDropout(base_layer.BaseRandomLayer):
         })
         return config
 
+class HistoryDropout(base_layer.BaseRandomLayer):
+    def __init__(self, dropout, seed=None, **kwargs):
+        super().__init__(seed=seed, **kwargs)
+        
+        if isinstance(dropout, (int, float)) and not 0 <= dropout <= 1:
+            raise ValueError('Invalid value %s for dropout, expected a value in [0, 1]' % dropout)
+        
+        self.dropout = dropout
+        self.seed = seed
+    
+    def call(self, inputs, training=None):
+        if training is None:
+            training = backend.learning_phase()
+        
+        multi_input = isinstance(inputs, (list, tuple))
+        if not multi_input:
+            outputs = [inputs]
+        else:
+            outputs = inputs
+        
+        def dropped_inputs():
+            # inputs is a list of tensors of same batch size and time
+            shape = tf.shape(outputs[0])
+            
+            # create a count of each time steps spot
+            t_cnt = tf.repeat(tf.expand_dims(tf.range(shape[1], delta=1, dtype=tf.float32), 0), repeats=shape[0], axis=0)
+            
+            # switch a random number of time steps off sequentially
+            sub_switchs = self._random_generator.random_uniform((shape[0], 1)) * tf.cast(shape[1] - 1, tf.float32)
+            sub_switchs = tf.less(sub_switchs, t_cnt)
+            sub_switchs = tf.expand_dims(sub_switchs, -1)
+            
+            # only use the sub sample at our specified rate
+            switchs = tf.less(self._random_generator.random_uniform((shape[0], 1, 1)), self.dropout)
+            
+            # apply the switch
+            samples = []
+            for out in outputs:
+                sub_sample = tf.where(sub_switchs, tf.identity(out), tf.zeros_like(out, dtype=out.dtype))
+                samples.append(tf.where(switchs, sub_sample, tf.identity(out)))
+            
+            return samples
+        
+        output = control_flow_util.smart_cond(
+            training, dropped_inputs, lambda: [tf.identity(out) for out in outputs]
+        )
+        
+        return output if multi_input else output[0]
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'dropout' : self.dropout,
+            'seed' : self.seed,
+        })
+        return config
+
 class ResNetBlock(tf.keras.layers.Layer):
     
     def __init__(self, activation, dropout, projection_scale, **kwargs):

@@ -17,13 +17,8 @@ class Predictor(tuning.Tunable):
         })
         return config
     
-    def transform(self, driver, hp):
-        if self.get_parameters(hp)['drop']:
-            return None
-        
-        outputs = driver.get_input_layers(self.names)
-        
-        return tf.concat(outputs, axis=-1)
+    def transform(self, inputs, driver, hp):
+        return None
 
 class LambdaPredictor(Predictor):
     def __init__(self, names, lambdas=None, **kwargs):
@@ -57,7 +52,7 @@ class LambdaPredictor(Predictor):
         
         return config
     
-    def transform(self, driver, hp):
+    def transform(self, inputs, driver, hp):
         config = self.get_parameters(hp)
         
         if config['drop']:
@@ -66,13 +61,11 @@ class LambdaPredictor(Predictor):
         if self.lambda_count == 0:
             return None
         
-        outputs = driver.get_input_layers(self.names)
-        
         res = []
         for i in range(self.lambda_count):
             if not config['lambda_%s_drop' % i]:
                 lbda = getattr(self, 'lambda_%s' % i)
-                res.append(lbda(self, outputs, driver, **config))
+                res.append(lbda(self, inputs, driver, **config))
         
         if len(res) == 0:
             return None
@@ -91,14 +84,20 @@ class NumericalPredictor(LambdaPredictor):
         })
         return config
     
-    def body(self, inputs, driver, normalize, **kwargs):
-        if normalize:
-            for i in range(len(self.names)):
-                normal_layer = tf.keras.layers.Normalization()
-                normal_layer.adapt(driver.get_training_data(self.names[i]))
-                inputs[i] = normal_layer(inputs[i])
+    def body(self, inputs, driver, normalize, **kwargs):  
         
-        return tf.concat(inputs, axis=-1)
+        outputs = []
+        
+        if normalize:
+            for name in self.names:
+                normal_layer = tf.keras.layers.Normalization()
+                normal_layer.adapt(driver.get_training_data(name))
+                outputs.append(normal_layer(inputs[name]))
+        else:
+            for name in self.names:
+                outputs.append(inputs[name])
+        
+        return tf.concat(outputs, axis=-1)
 
 class PeriodicPredictor(LambdaPredictor):
     def __init__(self, names, period, **kwargs):
@@ -113,9 +112,11 @@ class PeriodicPredictor(LambdaPredictor):
         return config
     
     def body(self, inputs, driver, period, **kwargs):
-        inputs = tf.concat(inputs, axis=-1)
+        outputs = [inputs[name] for name in self.names]
         
-        theta = 2 * np.pi * inputs / self.get_parameters(hp)['period']
+        outputs = tf.concat(outputs, axis=-1)
+        
+        theta = 2 * np.pi * outputs / self.get_parameters(hp)['period']
         
         return tf.concat([tf.math.sin(theta), tf.math.cos(theta)], axis=-1)
     
@@ -125,12 +126,14 @@ class TimeMaskedPredictor(LambdaPredictor):
         self.mask_n = mask_n
     
     def body(self, inputs, driver, period, **kwargs):
-        inputs = tf.concat(inputs, axis=-1)
+        outputs = [inputs[name] for name in self.names]
         
-        if len(inputs.shape) < 3:
+        outputs = tf.concat(outputs, axis=-1)
+        
+        if len(outputs.shape) < 3:
             raise ValueError('Time masked predictor must have at least (3) dimensions')
         
-        unmasked, masked = tf.split(inputs, [-1, self.mask_n], axis=1)
+        unmasked, masked = tf.split(outputs, [-1, self.mask_n], axis=1)
         masked = masked * 0.0
         
         return tf.concat([unmasked, masked], axis=1)
@@ -168,18 +171,19 @@ class CategoricalPredictor(LambdaPredictor):
         return config
     
     def body(self, inputs, driver, dropout, use_one_hot, embed_dim, embed_l2_regularizer, **kwargs):
+        outputs = [inputs[name] for name in self.names]
         
         # format to flat tensor for each input, this will be
         # expanded by a dimension in the end to (3)
-        for i in len(inputs):
-            input_shape = len(inputs[i].shape)
+        for i in len(outputs):
+            input_shape = len(outputs[i].shape)
             
             if input_shape > 3:
                 raise ValueError('Categorical predictor input must be (1) dims for flat data, or (2) dims for time-series')
 
             # flatten time series
             if input_shape == 3:
-                inputs[i] = tf.squeeze(inputs[i], axis=2)
+                outputs[i] = tf.squeeze(outputs[i], axis=2)
         
         # create dropout layer
         dropout_layer = layers.CategoricalDropout(
@@ -189,30 +193,30 @@ class CategoricalPredictor(LambdaPredictor):
         )
         
         # apply dropout to each input
-        for i in range(len(inputs)):
-            inputs[i] = dropout_layer(inputs[i])
+        for i in range(len(outputs)):
+            outputs[i] = dropout_layer(outputs[i])
             
             # encode to numeric
             encode_layer = tf.keras.layers.StringLookup(oov_token=self.dropout_token)
             encode_layer.adapt(driver.get_training_data(self.names[i]))
-            inputs[i] = encode_layer(inputs[i])
+            outputs[i] = encode_layer(outputs[i])
             
             # get the vocab size for this input
             vocab_size = len(encode_layer.get_vocabulary())
         
             # if one hot encoding
             if use_one_hot:
-                inputs[i] = tf.keras.layers.Embedding(
+                outputs[i] = tf.keras.layers.Embedding(
                     input_dim=vocab_size,
                     output_dim=vocab_size,
                     embeddings_initializer=tf.keras.initializers.Identity(),
                     trainable=False,
-                )(inputs[i])
+                )(outputs[i])
             else: # we are embedding categories
-                inputs[i] = tf.keras.layers.Embedding(
+                outputs[i] = tf.keras.layers.Embedding(
                     input_dim=vocab_size,
                     output_dim=embed_dim,
                     embeddings_regularizer=tf.keras.regularizers.L2(embed_l2_regularizer),
-                )(inputs[i])
+                )(outputs[i])
         
-        return tf.concat(inputs, axis=-1)
+        return tf.concat(outputs, axis=-1)

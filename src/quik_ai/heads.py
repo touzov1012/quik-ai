@@ -36,8 +36,8 @@ class Head(tuning.Tunable):
         return self.body(inputs, **config)
 
 class RegressionHead(Head):
-    def __init__(self, event_size=1, loss_name='mean_squared_error', **kwargs):
-        super().__init__('RegressionHead', **kwargs)
+    def __init__(self, name, event_size=1, loss_name='mean_squared_error', **kwargs):
+        super().__init__(name, **kwargs)
         
         self.event_size = event_size
         self.loss_name = loss_name
