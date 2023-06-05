@@ -14,8 +14,9 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         predictors,
         driver,
         time_window=1,
-        time_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        time_dropout=0.05,
         seed=None,
+        run_eagerly=None,
         **kwargs
     ):
         kt.HyperModel.__init__(self, name, **kwargs)
@@ -29,6 +30,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         self.time_window = time_window
         self.time_dropout = time_dropout
         self.seed = seed
+        self.run_eagerly = run_eagerly
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
@@ -136,6 +138,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             loss=self.head.loss(), 
             optimizer=self.driver.get_optimizer(hp), 
             weighted_metrics=self.head.metrics(),
+            run_eagerly=self.run_eagerly,
         )
         
         return model

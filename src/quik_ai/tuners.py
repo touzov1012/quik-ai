@@ -8,5 +8,5 @@ class TunerContainer:
     def get_tuner_params(self):
         return self.kwargs.copy()
 
-def DefaultTuner():
-    return TunerContainer(kt.Hyperband)
+def DefaultTuner(**kwargs):
+    return TunerContainer(kt.Hyperband, **kwargs)

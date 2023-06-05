@@ -65,7 +65,7 @@ class LambdaPredictor(Predictor):
         for i in range(self.lambda_count):
             if not config['lambda_%s_drop' % i]:
                 lbda = getattr(self, 'lambda_%s' % i)
-                res.append(lbda(self, inputs, driver, **config))
+                res.append(lbda(inputs, driver, **config))
         
         if len(res) == 0:
             return None
@@ -74,14 +74,15 @@ class LambdaPredictor(Predictor):
     
 class NumericalPredictor(LambdaPredictor):
     def __init__(self, names, normalize=False, **kwargs):
-        super().__init__(names, lambdas=body, **kwargs)
+        super().__init__(names, lambdas=self.body, **kwargs)
         self.normalize = normalize
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
-        config.update({
-            'normalize' : self._get_hp(None, 'normalize', hp)
-        })
+        
+        with self._condition_on_parent(hp, 'drop', [False], scope=None) as scope:
+            config['normalize'] = self._get_hp(scope, 'normalize', hp)
+        
         return config
     
     def body(self, inputs, driver, normalize, **kwargs):  
@@ -101,14 +102,15 @@ class NumericalPredictor(LambdaPredictor):
 
 class PeriodicPredictor(LambdaPredictor):
     def __init__(self, names, period, **kwargs):
-        super().__init__(names, lambdas=body, **kwargs)
+        super().__init__(names, lambdas=self.body, **kwargs)
         self.period = period
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
-        config.update({
-            'period' : self._get_hp(None, 'period', hp)
-        })
+        
+        with self._condition_on_parent(hp, 'drop', [False], scope=None) as scope:
+            config['period'] = self._get_hp(scope, 'period', hp)
+        
         return config
     
     def body(self, inputs, driver, period, **kwargs):
@@ -122,7 +124,7 @@ class PeriodicPredictor(LambdaPredictor):
     
 class TimeMaskedPredictor(LambdaPredictor):
     def __init__(self, names, mask_n=1, **kwargs):
-        super().__init__(names, lambdas=body, **kwargs)
+        super().__init__(names, lambdas=self.body, **kwargs)
         self.mask_n = mask_n
     
     def body(self, inputs, driver, period, **kwargs):
@@ -150,7 +152,7 @@ class CategoricalPredictor(LambdaPredictor):
         seed=None,
         **kwargs
     ):
-        super().__init__(names, lambdas=body, **kwargs)
+        super().__init__(names, lambdas=self.body, **kwargs)
         self.dropout = dropout
         self.use_one_hot = use_one_hot
         self.embed_dim = embed_dim

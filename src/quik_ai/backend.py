@@ -28,7 +28,7 @@ def join_path(path, *paths):
 def info(message, verbose):
     if verbose < 1:
         return
-    logging.info(message)
+    print(message, flush=True)
 
 def warning(message):
     logging.warning(message)

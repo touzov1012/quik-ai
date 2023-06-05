@@ -33,7 +33,7 @@ class Head(tuning.Tunable):
         config = self.get_parameters(hp)
         
         if config['non_linear_projection']:
-            inputs = tf.keras.layers.Dense(inputs.shape[-1] * config['projection_scale'], activation=config['activation'])
+            inputs = tf.keras.layers.Dense(inputs.shape[-1] * config['projection_scale'], activation=config['activation'])(inputs)
         
         return self.body(inputs, **config)
 

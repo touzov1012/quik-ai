@@ -76,13 +76,13 @@ class Driver(tuning.Tunable):
         return self.optimizer
     
     def get_training_steps_per_epoch(self, hp):
-        steps_per_epoch = self.training_data.shape[0] // self.get_parameters(hp)['batch_size']
+        steps_per_epoch = max(self.training_data.shape[0] // self.get_parameters(hp)['batch_size'], 1)
         if self.max_steps_per_epoch is not None:
             return min(self.max_steps_per_epoch, steps_per_epoch)
         return steps_per_epoch
     
     def get_validation_steps_per_epoch(self, hp):
-        return self.validation_data.shape[0] // self.get_parameters(hp)['batch_size']
+        return max(self.validation_data.shape[0] // self.get_parameters(hp)['batch_size'], 1)
     
     def __get_phantom_time_data(self, data, time_window):
         
@@ -246,19 +246,19 @@ class Driver(tuning.Tunable):
         # we either have a time series or not, if we have a time series
         # we will use the generator to get data to avoid memory overflow
         # otherwise we can use the full data without processing
-        X_vals = []
+        input_tensor_specs = []
         for name in input_names:
-            dtype = self.driver.get_input_dtype(name)
-            shape = self.driver.get_input_shape(name)
+            dtype = self.get_input_dtype(name)
+            shape = self.get_input_shape(name)
 
             # append time dimension
             if time_window > 1:
                 shape = (time_window,) + shape
             
-            X_vals.append(tf.TensorSpec(shape=shape, dtype=dtype))
+            input_tensor_specs.append(tf.TensorSpec(shape=shape, dtype=dtype))
         
         # build the signature
-        output_signature = dict(zip(X_keys, X_vals))
+        output_signature = dict(zip(input_names, input_tensor_specs))
 
         # append the response and weights
         if Y is not None:
@@ -292,6 +292,24 @@ class Driver(tuning.Tunable):
     
     def get_validation_tensorflow_dataset(self, input_names, response, time_window, hp):
         return self.get_tensorflow_dataset(self.validation_data, input_names, response, True, time_window, hp)
+    
+def train_val_test_split(df, p=[0.8,0.1,0.1]):
+    '''
+    Split a pandas df into training, validation and test sets
+    
+    df:  the dataframe to split
+    p:   the proportions to split, splits are done sequentially in the data
+    '''
+    
+    n0 = int(df.shape[0] * p[0])
+    n1 = int(df.shape[0] * (p[0] + p[1]))
+    n2 = int(df.shape[0] * (p[0] + p[1] + p[2]))
+    
+    df_train = df.iloc[0:n0].reset_index(drop=True)
+    df_val = df.iloc[n0:n1].reset_index(drop=True)
+    df_test = df.iloc[n1:n2].reset_index(drop=True)
+    
+    return df_train, df_val, df_test
     
 def build(
     hyper_model,

@@ -85,6 +85,11 @@ class Tunable:
             if len(pts) < 2:
                 continue
             
+            obj_name = '/'.join(pts[:-1])
+            
+            if obj_name != self.name:
+                continue
+            
             if not hasattr(self, pts[-1]):
                 continue
             
