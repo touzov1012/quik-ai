@@ -107,3 +107,6 @@ class Tunable:
     
     def get_parameters(self, hp):
         return {}
+    
+    def get_dependent_tunables(self):
+        return [self]

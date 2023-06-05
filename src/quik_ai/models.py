@@ -9,6 +9,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
     def __init__(
         self, 
         name, 
+        response,
         head,
         predictors,
         driver,
@@ -20,6 +21,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         kt.HyperModel.__init__(self, name, **kwargs)
         tuning.Tunable.__init__(self, name, **kwargs)
         
+        self.response = response
         self.head = head
         self.predictors = predictors
         self.driver = driver
@@ -37,23 +39,38 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         })
         return config
     
+    def get_dependent_tunables(self):
+        tunables = super().get_dependent_tunables()
+        tunables.extend(self.driver.get_dependent_tunables())
+        tunables.extend(self.head.get_dependent_tunables())
+        for predictor in self.predictors:
+            tunables.extend(predictor.get_dependent_tunables())
+        return tunables
+    
+    def get_input_names(self):
+        names = []
+        uniques = set()
+        for predictor in self.predictors:
+            for name in predictor.names:
+                if name not in uniques:
+                    uniques.add(name)
+                    names.append(name)
+        return names
+    
     def __build_input_layers(self, time_window, **kwargs):
         input_layers = {}
         
-        for predictor in self.predictors:
-            for name in predictor.names:
-                # we already cached this input layer
-                if name in input_layers:
-                    continue
-                
-                dtype = self.driver.get_input_dtype(name)
-                shape = self.driver.get_input_shape(name)
-                
-                # append time dimension
-                if time_window > 1:
-                    shape = (time_window,) + shape
-                
-                input_layers[name] = tf.keras.Input(name=name, dtype=dtype, shape=shape)
+        input_names = self.get_input_names()
+        
+        for name in input_names:
+            dtype = self.driver.get_input_dtype(name)
+            shape = self.driver.get_input_shape(name)
+
+            # append time dimension
+            if time_window > 1:
+                shape = (time_window,) + shape
+
+            input_layers[name] = tf.keras.Input(name=name, dtype=dtype, shape=shape)
         
         return input_layers
     
@@ -124,12 +141,28 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         return model
     
     def fit(self, hp, model, *args, **kwargs):
-        return driver.fit(hp, model, *args, **kwargs)
+        # if we want to build without tuning fill out a
+        # dummy instance of hp so we can sample some params
+        if hp is None:
+            hp = kt.HyperParameters()
+        
+        config = self.get_parameters(hp)
+        input_names = self.get_input_names()
+        
+        return model.fit(
+            self.driver.get_training_tensorflow_dataset(input_names, self.response, config['time_window'], hp),
+            *args, 
+            steps_per_epoch=self.driver.get_training_steps_per_epoch(hp), 
+            validation_data=self.driver.get_validation_tensorflow_dataset(input_names, self.response, config['time_window'], hp), 
+            validation_steps=self.driver.get_validation_steps_per_epoch(hp), 
+            **kwargs
+        )
 
 class ResNet(HyperModel):
     
     def __init__(
         self,
+        response,
         head,
         predictors,
         driver,
@@ -140,7 +173,7 @@ class ResNet(HyperModel):
         projection_scale=tuning.HyperInt(min_value=1, max_value=4),
         **kwargs
     ):
-        super().__init__('ResNet', head, predictors, driver, **kwargs)
+        super().__init__('ResNet', response, head, predictors, driver, **kwargs)
         
         self.model_dim = model_dim
         self.blocks = blocks

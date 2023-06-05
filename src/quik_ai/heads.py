@@ -9,6 +9,7 @@ class Head(tuning.Tunable):
         non_linear_projection=tuning.HyperBoolean(),
         projection_scale=tuning.HyperInt(min_value=1, max_value=4),
         activation=tuning.HyperChoice(['relu','gelu']),
+        objective_direction='min',
         **kwargs
     ):
         super().__init__(name, **kwargs)
@@ -16,6 +17,7 @@ class Head(tuning.Tunable):
         self.non_linear_projection = non_linear_projection
         self.projection_scale = projection_scale
         self.activation = activation
+        self.objective_direction = objective_direction
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
@@ -36,14 +38,17 @@ class Head(tuning.Tunable):
         return self.body(inputs, **config)
 
 class RegressionHead(Head):
-    def __init__(self, name, event_size=1, loss_name='mean_squared_error', **kwargs):
-        super().__init__(name, **kwargs)
+    def __init__(self, event_size=1, loss_name='mean_squared_error', **kwargs):
+        super().__init__('RegressionHead', **kwargs)
         
         self.event_size = event_size
         self.loss_name = loss_name
     
     def body(self, inputs, **kwargs):
         return tf.keras.layers.Dense(self.event_size)(inputs)
+    
+    def monitor(self):
+        return self.loss_name
     
     def loss(self):
         return self.loss_name
