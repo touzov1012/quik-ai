@@ -293,10 +293,9 @@ class Driver(tuning.Tunable):
     def get_validation_tensorflow_dataset(self, input_names, response, time_window, hp):
         return self.get_tensorflow_dataset(self.validation_data, input_names, response, True, time_window, hp)
     
-    
 def build(
     hyper_model,
-    tuner,
+    tuner_container,
     early_stopping_tune=10, 
     early_stopping_full=10,
     full_rounds=5,
@@ -312,12 +311,14 @@ def build(
     checkpoint_monitor = 'val_' + hyper_model.head.monitor()
 
     # create the tuner
-    tuner = self.tuner(
+    tuner_params = tuner_container.get_tuner_params()
+    tuner_epochs = tuner_params.pop('epochs', 1)
+    tuner = tuner_container.tuner(
         hyper_model, 
         objective=kt.Objective(checkpoint_monitor, direction=hyper_model.head.objective_direction),
         directory=backend.join_path(build_dir, 'tuner'),
         project_name='kt_tuner', 
-        **self.tuner.get_tuner_params()
+        **tuner_params
     )
 
     # early stopping
@@ -329,7 +330,7 @@ def build(
 
     # search the space
     tuner.search(
-        epochs=self.tuner.get_tuner_epochs(), 
+        epochs=tuner_epochs, 
         callbacks=[tf.keras.callbacks.TerminateOnNaN(), early_stopping], 
         verbose=backend.clamp(verbose)
     )
