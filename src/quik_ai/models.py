@@ -1,5 +1,6 @@
 from quik_ai import tuning
 from quik_ai import layers
+from quik_ai import backend
 
 import tensorflow as tf
 import keras_tuner as kt
@@ -13,6 +14,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         head,
         predictors,
         driver,
+        instance=None,
         time_window=1,
         time_dropout=0.05,
         seed=None,
@@ -26,6 +28,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         self.head = head
         self.predictors = predictors
         self.driver = driver
+        self.instance = instance
         
         self.time_window = time_window
         self.time_dropout = time_dropout
@@ -129,7 +132,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         
         # construct the model
         model = tf.keras.Model(
-            inputs=inputs.values(), 
+            inputs=list(inputs.values()), 
             outputs=outputs,
         )
         
@@ -160,6 +163,109 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             validation_steps=self.driver.get_validation_steps_per_epoch(hp), 
             **kwargs
         )
+    
+    def train(
+        self,
+        tuner_container,
+        early_stopping_tune=10, 
+        early_stopping_full=10,
+        full_rounds=5,
+        working_dir='.', 
+        verbose=1
+    ):
+        # create working directory for the build
+        build_dir = backend.create_unique_dir(working_dir=working_dir)
+
+        backend.info('Checking for hyper-parameters to tune ...', verbose)
+
+        # set up the keras tuner parameters
+        checkpoint_monitor = 'val_' + self.head.monitor()
+
+        # create the tuner
+        tuner_params = tuner_container.get_tuner_params()
+        tuner_epochs = tuner_params.pop('epochs', 1)
+        tuner = tuner_container.tuner(
+            self, 
+            objective=kt.Objective(checkpoint_monitor, direction=self.head.objective_direction),
+            directory=backend.join_path(build_dir, 'tuner'),
+            project_name='kt_tuner', 
+            **tuner_params
+        )
+
+        # early stopping
+        early_stopping = tf.keras.callbacks.EarlyStopping(
+            monitor=checkpoint_monitor, 
+            patience=early_stopping_tune,
+            mode=self.head.objective_direction
+        )
+
+        # search the space
+        tuner.search(
+            epochs=tuner_epochs, 
+            callbacks=[tf.keras.callbacks.TerminateOnNaN(), early_stopping], 
+            verbose=backend.clamp(verbose)
+        )
+
+        # get the best hyperparameters
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)
+        if best_hps is not None and len(best_hps) > 0:
+            best_hps = best_hps[0].values
+
+            # apply to all parameters tuned through model
+            tunables = self.get_dependent_tunables()
+            for tunable in tunables:
+                tunable._apply_hp(best_hps)
+
+        # early stopping
+        early_stopping = tf.keras.callbacks.EarlyStopping(
+            monitor=checkpoint_monitor, 
+            patience=early_stopping_full,
+            mode=self.head.objective_direction
+        )
+
+        # checkpoint to catch best validation
+        checkpoint_filepath = backend.join_path(build_dir, 'cp')
+        model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+            filepath=checkpoint_filepath,
+            save_weights_only=True,
+            monitor=checkpoint_monitor,
+            mode=self.head.objective_direction,
+            save_best_only=True,
+            verbose=backend.clamp(verbose-1)
+        )
+
+        # full training
+        for i in range(full_rounds):
+
+            # clean up last model
+            if i > 0:
+                del model
+                backend.clean_tensorflow()
+
+            # re-initialize the model
+            model = self.build(None)
+
+            # fit the model
+            history = self.fit(
+                None, 
+                model, 
+                epochs=1_000_000, 
+                callbacks=[tf.keras.callbacks.TerminateOnNaN(), model_checkpoint_callback, early_stopping], 
+                verbose=backend.clamp(verbose-2)
+            )
+
+            # process history to get extrema score
+            scores = history.history[checkpoint_monitor]
+            curr_score = min(scores) if self.head.objective_direction == 'min' else max(scores)
+
+            # log the current run
+            backend.info('Round %s best score: %.4f' % (i+1, curr_score), verbose)
+
+        # load the best weights
+        model.load_weights(checkpoint_filepath)
+        
+        # store the model instance
+        self.instance = model
 
 class ResNet(HyperModel):
     

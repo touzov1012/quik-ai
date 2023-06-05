@@ -63,3 +63,15 @@ def nan_copy_of_size(n, data):
             new_df[col] = new_df[col].astype(data[col].dtype)
     
     return new_df
+
+def train_val_test_split(df, p=[0.8,0.1,0.1]):
+    
+    n0 = int(df.shape[0] * p[0])
+    n1 = int(df.shape[0] * (p[0] + p[1]))
+    n2 = int(df.shape[0] * (p[0] + p[1] + p[2]))
+    
+    df_train = df.iloc[0:n0].reset_index(drop=True)
+    df_val = df.iloc[n0:n1].reset_index(drop=True)
+    df_test = df.iloc[n1:n2].reset_index(drop=True)
+    
+    return df_train, df_val, df_test

@@ -177,7 +177,7 @@ class CategoricalPredictor(LambdaPredictor):
         
         # format to flat tensor for each input, this will be
         # expanded by a dimension in the end to (3)
-        for i in len(outputs):
+        for i in range(len(outputs)):
             input_shape = len(outputs[i].shape)
             
             if input_shape > 3:
