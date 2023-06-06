@@ -1,6 +1,7 @@
 from quik_ai import tuning
 from quik_ai import layers
 from quik_ai import backend
+from quik_ai import tuners
 
 import tensorflow as tf
 import keras_tuner as kt
@@ -166,13 +167,17 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
     
     def train(
         self,
-        tuner_container,
+        tuner_container=None,
         early_stopping_tune=10, 
         early_stopping_full=10,
         full_rounds=5,
         working_dir='.', 
         verbose=1
     ):
+        # if no tuner, set the default option
+        if tuner_container is None:
+            tuner_container = tuners.TunerContainer(kt.Hyperband)
+        
         # create working directory for the build
         build_dir = backend.create_unique_dir(working_dir=working_dir)
 
@@ -266,6 +271,72 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         
         # store the model instance
         self.instance = model
+    
+    def predict(self, data):
+        
+        if self.instance is None:
+            backend.error('Cannot predict for a NULL instance. Make sure you train the model before invoking.')
+            return None
+        
+        # build the input dataset from the numpy array
+        tdf = self.driver.get_tensorflow_dataset(
+            data, 
+            input_names=self.get_input_names(), 
+            response=None, 
+            run_forever=False, 
+            time_window=self.time_window, 
+            hp=None, 
+            shuffle=False
+        )
+        
+        return self.instance.predict(tdf)
+    
+    def evaluate(self, data):
+        
+        if self.instance is None:
+            backend.error('Cannot evaluate for a NULL instance. Make sure you train the model before invoking.')
+            return None
+        
+        # build the input dataset from the numpy array
+        tdf = self.driver.get_tensorflow_dataset(
+            data, 
+            input_names=self.get_input_names(), 
+            response=self.response, 
+            run_forever=False, 
+            time_window=self.time_window, 
+            hp=None, 
+            shuffle=False
+        )
+        
+        # evalute the results
+        evals = self.instance.evaluate(tdf)
+        
+        # pair each result with the metric name
+        res = {}
+        for i in range(len(evals)):
+            res[self.instance.metrics[i].name.strip('_')] = evals[i]
+        
+        return res
+    
+    def get_instance_parameters(self):
+        
+        if self.instance is None:
+            backend.error('Cannot fetch instance parameters for a NULL instance. Make sure you train the model before invoking.')
+            return None
+        
+        tunables = self.get_dependent_tunables()
+        
+        all_params = {}
+        
+        # iterate over each tunable in our dependent stack
+        for tunable in tunables:
+            params = tunable.get_parameters(None)
+            
+            # iterate over all params in the tunable
+            for key, value in params.items():
+                all_params['%s/%s' % (tunable.name, key)] = value
+        
+        return all_params
 
 class ResNet(HyperModel):
     

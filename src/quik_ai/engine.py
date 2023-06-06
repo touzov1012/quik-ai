@@ -273,8 +273,12 @@ class Driver(tuning.Tunable):
             output_signature=output_signature
         )
     
-    def get_tensorflow_dataset(self, data, input_names, response, run_forever, time_window, hp):
+    def get_tensorflow_dataset(self, data, input_names, response, run_forever, time_window, hp, shuffle=None):
         config = self.get_parameters(hp)
+        
+        # option added to not shuffle if we want to do inference
+        if shuffle is not None:
+            config['shuffle'] = shuffle
         
         tdf = self.__get_tensorflow_generator(
             data, 
