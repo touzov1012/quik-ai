@@ -1,9 +1,29 @@
 import tensorflow as tf
+import tensorflow_probability as tfp
 
 from keras import backend
 from keras.engine import base_layer
 from keras.utils import control_flow_util
 
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class GaussianMixtureLayer(tf.keras.layers.Layer):
+    def __init__(self, num_components, event_shape, **kwargs):
+        super().__init__(**kwargs)
+        self.num_components = num_components
+        self.event_shape = event_shape
+
+    def call(self, inputs):
+        return tfp.layers.MixtureNormal(self.num_components, self.event_shape)(inputs)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'num_components' : self.num_components,
+            'event_shape' : self.event_shape
+        })
+        return config
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
 class CategoricalDropout(base_layer.BaseRandomLayer):
     def __init__(self, dropout, dropout_token='[UNK]', seed=None, **kwargs):
         super().__init__(seed=seed, **kwargs)
@@ -38,6 +58,7 @@ class CategoricalDropout(base_layer.BaseRandomLayer):
         })
         return config
 
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
 class HistoryDropout(base_layer.BaseRandomLayer):
     def __init__(self, dropout, seed=None, **kwargs):
         super().__init__(seed=seed, **kwargs)
@@ -95,6 +116,7 @@ class HistoryDropout(base_layer.BaseRandomLayer):
         })
         return config
 
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
 class ResNetBlock(tf.keras.layers.Layer):
     
     def __init__(self, activation, dropout, projection_scale, **kwargs):

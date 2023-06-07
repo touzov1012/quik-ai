@@ -6,7 +6,7 @@ setup(
 		'pandas>=1.3.5',
 		'numpy>=1.21.6',
 		'tensorflow>=2.9.3',
-		'tensorflow-probability>=0.19.0',
+		'tensorflow-probability>=0.17.0',
 		'keras>=2.9.0',
 		'keras-tuner>=1.2.0',
 	],
