@@ -5,6 +5,7 @@ import tensorflow as tf
 class Optimizer(tuning.Tunable):
     pass
 
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
 class NoamSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, model_dim, warmup_steps, **kwargs):
         super().__init__(**kwargs)
@@ -20,11 +21,10 @@ class NoamSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         return tf.math.rsqrt(tf.cast(self.model_dim, tf.float32)) * tf.math.minimum(arg1, arg2)
     
     def get_config(self):
-        config = super().get_config()
-        config.update({
+        config = {
             'model_dim' : self.model_dim,
             'warmup_steps' : self.warmup_steps,
-        })
+        }
         return config
     
 class Noam(Optimizer):

@@ -3,6 +3,8 @@ from quik_ai import layers
 from quik_ai import backend
 from quik_ai import tuners
 
+import os
+import pickle
 import tensorflow as tf
 import keras_tuner as kt
 
@@ -35,6 +37,48 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         self.time_dropout = time_dropout
         self.seed = seed
         self.run_eagerly = run_eagerly
+    
+    @classmethod
+    def load(cls, filepath='./model'):
+        # load tensorflow model, if it was saved
+        model = None
+        tf_model_path = backend.join_path(filepath, 'tf_model')
+        if os.path.exists(tf_model_path):
+            model = tf.keras.models.load_model(tf_model_path)
+
+        # load other attributes
+        with open(backend.join_path(filepath, 'attrs.pkl'), 'rb') as f:
+            data = pickle.load(f)
+
+        attrs = data['attrs']
+        class_name = data['class_name']
+        attrs['instance'] = model
+
+        # get the class
+        actual_class = globals()[class_name]
+
+        # create a new instance of the class
+        instance = actual_class(**attrs)
+
+        return instance
+    
+    def save(self, filepath='./model'):
+        # make sure the directory exists
+        os.makedirs(filepath, exist_ok=True)
+
+        # save model in a subfolder, if it exists
+        if self.instance is not None:
+            self.instance.save(backend.join_path(filepath, 'tf_model'))
+
+        # save other attributes with pickle
+        attrs = {name: attr for name, attr in self.__dict__.items() if name != 'instance' and not callable(attr) and not name.startswith('_')}
+        data = {
+            'class_name': self.__class__.__name__,
+            'attrs': attrs,
+        }
+        
+        with open(backend.join_path(filepath, 'attrs.pkl'), 'wb') as f:
+            pickle.dump(data, f)
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
@@ -351,9 +395,10 @@ class ResNet(HyperModel):
         activation=tuning.HyperChoice(['relu','gelu']),
         dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
         projection_scale=tuning.HyperInt(min_value=1, max_value=4),
+        name='ResNet',
         **kwargs
     ):
-        super().__init__('ResNet', response, head, predictors, driver, **kwargs)
+        super().__init__(name, response, head, predictors, driver, **kwargs)
         
         self.model_dim = model_dim
         self.blocks = blocks
