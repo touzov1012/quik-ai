@@ -86,24 +86,21 @@ class Driver(tuning.Tunable):
     
     def __get_phantom_time_data(self, data, time_window):
         
+        # we have no time series data
+        if time_window <= 1:
+            return []
+        
         # we dont have a time group, but want to make sure there is enough data in our time window
         if self.time_group_column is None:
-            extra_needed = time_window - data.shape[0]
-            if extra_needed > 0:
-                extras = backend.nan_copy_of_size(extra_needed, data)
-                extras = backend.fillna(extras)
-                return [extras]
-            return []
+            extras = backend.nan_copy_of_size(time_window - 1, data)
+            extras = backend.fillna(extras)
+            return [extras]
         
         to_append = []
         group_counts = data.groupby(self.time_group_column).size().to_dict()
         for key, value in group_counts.items():
-            extra_needed = time_window - value
-            if extra_needed <= 0:
-                continue
-
             # append empty data
-            extras = backend.nan_copy_of_size(extra_needed, data)
+            extras = backend.nan_copy_of_size(time_window - 1, data)
             extras = backend.fillna(extras)
             extras[self.time_group_column] = key
             to_append.append(extras)
@@ -173,6 +170,7 @@ class Driver(tuning.Tunable):
         to_append = self.__get_phantom_time_data(data, time_window)
         
         # add the buffer
+        original_data_count = data.shape[0]
         if to_append:
             to_append.append(data)
             data = pd.concat(to_append, ignore_index=True)
@@ -184,41 +182,37 @@ class Driver(tuning.Tunable):
         indices, Xf_dict, Xs_dict, Y_dict, W_dict, time_group = self.__build_data_time_groups(data, Xf, Xs, Y, W)
         
         # generator for getting data from the dataframe
-        starts = np.arange(data.shape[0] - time_window + 1)
+        ends = np.arange(data.shape[0] - original_data_count, data.shape[0])
         
         # build the generator
         def generator():
             while True:
                 # shuffle if we need to
                 if shuffle:
-                    np.random.shuffle(starts)
+                    np.random.shuffle(ends)
 
                 # yield loop to iterate over the data
-                for start in starts:
+                for end in ends:
 
-                    # cut off data prior to start
-                    Xf = Xf_dict['__ALL__'][start:]
-                    Xs = Xs_dict['__ALL__'][start:]
-                    Y = Y_dict['__ALL__'][start:] if Y_dict['__ALL__'] is not None else None
-                    W = W_dict['__ALL__'][start:] if W_dict['__ALL__'] is not None else None
+                    # cut off data after end
+                    Xf = Xf_dict['__ALL__'][:end+1]
+                    Xs = Xs_dict['__ALL__'][:end+1]
+                    Y = Y_dict['__ALL__'][:end+1] if Y_dict['__ALL__'] is not None else None
+                    W = W_dict['__ALL__'][:end+1] if W_dict['__ALL__'] is not None else None
 
                     # filter to sub-array if we have a time group
                     if self.time_group_column is not None:
-                        group_type = time_group[start]
-                        start_loc = indices[group_type].index.get_loc(start)
-                        Xf = Xf_dict[group_type][start_loc:]
-                        Xs = Xs_dict[group_type][start_loc:]
-                        Y = Y_dict[group_type][start_loc:] if Y is not None else None
-                        W = W_dict[group_type][start_loc:] if W is not None else None
-
-                    # if we dont have enough data
-                    if time_window > Xf.shape[0]:
-                        continue
+                        group_type = time_group[end]
+                        end_loc = indices[group_type].index.get_loc(end)
+                        Xf = Xf_dict[group_type][:end_loc+1]
+                        Xs = Xs_dict[group_type][:end_loc+1]
+                        Y = Y_dict[group_type][:end_loc+1] if Y is not None else None
+                        W = W_dict[group_type][:end_loc+1] if W is not None else None
 
                     # different fetch for time series and flat array
                     if time_window >= 2:
-                        Xf = np.squeeze(np.lib.stride_tricks.sliding_window_view(Xf[:time_window], (time_window, Xf.shape[1])), axis=(0,1))
-                        Xs = np.squeeze(np.lib.stride_tricks.sliding_window_view(Xs[:time_window], (time_window, Xs.shape[1])), axis=(0,1))
+                        Xf = np.squeeze(np.lib.stride_tricks.sliding_window_view(Xf[-time_window:], (time_window, Xf.shape[1])), axis=(0,1))
+                        Xs = np.squeeze(np.lib.stride_tricks.sliding_window_view(Xs[-time_window:], (time_window, Xs.shape[1])), axis=(0,1))
                     else:
                         Xf = Xf[0]
                         Xs = Xs[0]
@@ -235,9 +229,9 @@ class Driver(tuning.Tunable):
                         yield dict(zip(X_keys, X_vals))
                     else:
                         if W is None:
-                            yield (dict(zip(X_keys, X_vals)), Y[time_window-1])
+                            yield (dict(zip(X_keys, X_vals)), Y[-1])
                         else:
-                            yield (dict(zip(X_keys, X_vals)), Y[time_window-1], W[time_window-1])
+                            yield (dict(zip(X_keys, X_vals)), Y[-1], W[-1])
                 
                 # should we terminate the forever loop for a single data pass?
                 if not run_forever:

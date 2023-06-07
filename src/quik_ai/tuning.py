@@ -61,6 +61,10 @@ class HyperInt(HyperVariable):
     
 class Tunable:
     def __init__(self, name, **kwargs):
+        
+        if isinstance(name, (tuple, list)):
+            name = ','.join(name)
+        
         self.name = name
         
     def _get_hp(self, scope, param_name, hp):
