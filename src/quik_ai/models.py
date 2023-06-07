@@ -13,6 +13,7 @@ import pickle
 import tensorflow as tf
 import keras_tuner as kt
 import numpy as np
+import pandas as pd
 
 class HyperModel(kt.HyperModel, tuning.Tunable):
     
@@ -451,6 +452,54 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             res[self.instance.metrics[i].name.strip('_')] = evals[i]
         
         return res
+    
+    def report(self, filepath='./model'):
+        
+        if self.instance is None:
+            backend.error('Cannot report for a NULL instance. Make sure you train the model before invoking.')
+            return
+        
+        # make sure the directory exists
+        os.makedirs(filepath, exist_ok=True)
+            
+        # readme
+        predictors = []
+        for lyr in self.instance.layers:
+            if lyr.__class__.__name__ == 'InputLayer':
+                predictors.append(lyr.name)
+
+        # check if we have mlflow active
+        active_run = mlflow.active_run() if mlflow is not None else None
+
+        # header and file name
+        fname = backend.join_path(filepath, 'README.md')
+        lines = []
+        lines.append('## Model\n\n')
+        lines.append('This README.md file outlines the parameters and predictors used by the model.\n\n')
+        lines.append('#### Input layers:\n\n')
+        lines.append('* %s\n\n' % '\n* '.join(predictors))
+
+        # save parameters table
+        parameters = self.get_instance_parameters()
+        if len(parameters) > 0:
+            parameters = {k: v for k, v in parameters.items() if not isinstance(v, tuning.HyperVariable)}
+            parameters = pd.DataFrame(list(parameters.items()), columns=['Parameter', 'Value'])
+            lines.append('#### Model parameters:\n\n')
+            lines.append('%s\n\n' % parameters.to_markdown(index=False))
+
+        # save full model scores
+        if self.driver is not None and self.driver.testing_data is not None:
+            scores = self.evaluate(self.driver.testing_data)
+            scores = pd.DataFrame(list(scores.items()), columns=['Metric', 'Value'])
+            lines.append('#### Model performance:\n\n')
+            lines.append('%s\n\n' % scores.to_markdown(index=False))
+
+        if active_run is not None:
+            mlflow.log_text(''.join(lines), fname)
+        else:
+            readme = open(fname, "w")
+            readme.write(''.join(lines))
+            readme.close()
     
     def get_instance_parameters(self):
         
