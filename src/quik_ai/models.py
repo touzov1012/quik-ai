@@ -3,10 +3,16 @@ from quik_ai import layers
 from quik_ai import backend
 from quik_ai import tuners
 
+try:
+    import mlflow
+except ImportError:  # pragma: no cover
+    mlflow = None  # pragma: no cover
+
 import os
 import pickle
 import tensorflow as tf
 import keras_tuner as kt
+import numpy as np
 
 class HyperModel(kt.HyperModel, tuning.Tunable):
     
@@ -153,6 +159,35 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         # will be either shape (batch, time, features) or (batch, features)
         return tf.concat(inputs, axis=-1)
     
+    def __build_mlflow_callback(self, metric_name, run_id, objective_direction, verbose):
+        class MlflowCallback(tf.keras.callbacks.Callback):
+            def on_epoch_end(self, epoch, logs=None):
+                if logs is None or run_id is None:
+                    return
+
+                if metric_name not in logs or np.isnan(logs[metric_name]):
+                    backend.info('Terminated epoch with NaN result ...', verbose)
+                    return
+
+                # get stored metrics
+                logged_metrics = mlflow.MlflowClient().get_run(run_id).data.metrics
+
+                # we need to post a new update
+                if metric_name not in logged_metrics:
+                    mlflow.MlflowClient().log_metric(run_id, metric_name, logs[metric_name])
+                    return
+                
+                if objective_direction == 'min' and logs[metric_name] < logged_metrics[metric_name]:
+                    mlflow.MlflowClient().log_metric(run_id, metric_name, logs[metric_name])
+                    return
+                
+                if objective_direction == 'max' and logs[metric_name] > logged_metrics[metric_name]:
+                    mlflow.MlflowClient().log_metric(run_id, metric_name, logs[metric_name])
+                    return
+        
+        # return the callback
+        return MlflowCallback()
+    
     def build(self, hp):
         
         # if we want to build without tuning fill out a
@@ -200,14 +235,31 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         config = self.get_parameters(hp)
         input_names = self.get_input_names()
         
-        return model.fit(
+        # cache the args to the fit function
+        fit_args = [
             self.driver.get_training_tensorflow_dataset(input_names, self.response, config['time_window'], hp),
             *args, 
+        ]
+        
+        # cache the kwargs to the fit function
+        fit_kwargs = dict(
             steps_per_epoch=self.driver.get_training_steps_per_epoch(hp), 
             validation_data=self.driver.get_validation_tensorflow_dataset(input_names, self.response, config['time_window'], hp), 
             validation_steps=self.driver.get_validation_steps_per_epoch(hp), 
-            **kwargs
         )
+        
+        # check if we have mlflow active
+        active_run = mlflow.active_run() if mlflow is not None else None
+        
+        # if we have an active mlflow run
+        if active_run is not None:
+            with mlflow.start_run(nested=True):
+                mlflow.log_params(hp.values)
+                mlflow.tensorflow.autolog()
+                return model.fit(*fit_args, **fit_kwargs, **kwargs)
+        
+        # no mlflow run, return as normal
+        return model.fit(*fit_args, **fit_kwargs, **kwargs)
     
     def train(
         self,
@@ -247,13 +299,29 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             patience=early_stopping_tune,
             mode=self.head.objective_direction
         )
+        
+        # mlflow callback
+        active_run = mlflow.active_run() if mlflow is not None else None
+        run_id = active_run.info.run_id if active_run is not None else None
+        
+        # if we have a mlflow job, create a child job
+        if run_id is not None:
+            mlflow.start_run(run_name='hyperparameter-search', nested=True)
 
         # search the space
         tuner.search(
             epochs=tuner_epochs, 
-            callbacks=[tf.keras.callbacks.TerminateOnNaN(), early_stopping], 
+            callbacks=[
+                tf.keras.callbacks.TerminateOnNaN(), 
+                early_stopping,
+                self.__build_mlflow_callback(checkpoint_monitor, run_id, self.head.objective_direction, verbose),
+            ], 
             verbose=backend.clamp(verbose)
         )
+        
+        # terminate the mlflow child job
+        if run_id is not None:
+            mlflow.end_run()
 
         # get the best hyperparameters
         best_hps = tuner.get_best_hyperparameters(num_trials=1)
@@ -282,6 +350,10 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             save_best_only=True,
             verbose=backend.clamp(verbose-1)
         )
+        
+        # if we have mlflow create the child job for the full training
+        if run_id is not None:
+            mlflow.start_run(run_name='full-training', nested=True)
 
         # full training
         for i in range(full_rounds):
@@ -294,14 +366,28 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             # re-initialize the model
             model = self.build(None)
 
+            # for each full training run, create a sub job
+            if run_id is not None:
+                mlflow.start_run(run_name='full-model-%s' % i, nested=True)
+                mlflow.tensorflow.autolog()
+            
             # fit the model
             history = self.fit(
                 None, 
                 model, 
                 epochs=1_000_000, 
-                callbacks=[tf.keras.callbacks.TerminateOnNaN(), model_checkpoint_callback, early_stopping], 
+                callbacks=[
+                    tf.keras.callbacks.TerminateOnNaN(), 
+                    model_checkpoint_callback, 
+                    early_stopping,
+                    self.__build_mlflow_callback(checkpoint_monitor, run_id, self.head.objective_direction, verbose),
+                ], 
                 verbose=backend.clamp(verbose-2)
             )
+            
+            # end the mlflow run
+            if run_id is not None:
+                mlflow.end_run()
 
             # process history to get extrema score
             scores = history.history[checkpoint_monitor]
@@ -310,6 +396,10 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             # log the current run
             backend.info('Round %s best score: %.4f' % (i+1, curr_score), verbose)
 
+        # end the full training job
+        if run_id is not None:
+            mlflow.end_run()
+            
         # load the best weights
         model.load_weights(checkpoint_filepath)
         
