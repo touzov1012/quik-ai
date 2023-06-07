@@ -54,7 +54,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             model = tf.keras.models.load_model(tf_model_path)
 
         # load other attributes
-        with open(backend.join_path(filepath, 'attrs.pkl'), 'rb') as f:
+        with open(backend.join_path(filepath, 'model.pkl'), 'rb') as f:
             data = pickle.load(f)
 
         attrs = data['attrs']
@@ -84,7 +84,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             'attrs': attrs,
         }
         
-        with open(backend.join_path(filepath, 'attrs.pkl'), 'wb') as f:
+        with open(backend.join_path(filepath, 'model.pkl'), 'wb') as f:
             pickle.dump(data, f)
     
     def get_parameters(self, hp):
@@ -491,7 +491,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         if self.driver is not None and self.driver.testing_data is not None:
             scores = self.evaluate(self.driver.testing_data)
             scores = pd.DataFrame(list(scores.items()), columns=['Metric', 'Value'])
-            lines.append('#### Model performance:\n\n')
+            lines.append('#### Test performance:\n\n')
             lines.append('%s\n\n' % scores.to_markdown(index=False))
 
         if active_run is not None:
