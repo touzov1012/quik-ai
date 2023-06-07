@@ -214,8 +214,8 @@ class Driver(tuning.Tunable):
                         Xf = np.squeeze(np.lib.stride_tricks.sliding_window_view(Xf[-time_window:], (time_window, Xf.shape[1])), axis=(0,1))
                         Xs = np.squeeze(np.lib.stride_tricks.sliding_window_view(Xs[-time_window:], (time_window, Xs.shape[1])), axis=(0,1))
                     else:
-                        Xf = Xf[0]
-                        Xs = Xs[0]
+                        Xf = Xf[-1]
+                        Xs = Xs[-1]
 
                     X_keys = []
                     X_vals = []

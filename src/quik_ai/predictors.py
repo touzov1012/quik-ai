@@ -7,7 +7,7 @@ import tensorflow as tf
 class Predictor(tuning.Tunable):
     def __init__(self, names, drop=False, **kwargs):
         super().__init__(names, **kwargs)
-        self.names = names
+        self.names = names if isinstance(names, (list, tuple)) else [names]
         self.drop = drop
     
     def get_parameters(self, hp):
