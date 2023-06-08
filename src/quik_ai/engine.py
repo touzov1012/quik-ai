@@ -67,6 +67,7 @@ class Driver(tuning.Tunable):
         return tf.float32 if self.training_data[column].dtype.kind in 'iufcb' else tf.string
     
     def get_input_shape(self, column):
+        # todo: add vector support
         return (1,)
     
     def get_optimizer(self, hp):

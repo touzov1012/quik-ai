@@ -145,3 +145,336 @@ class ResNetBlock(tf.keras.layers.Layer):
             'projection_scale' : self.projection_scale,
         })
         return config
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class ChunkEmbedding(tf.keras.layers.Layer):
+    def __init__(self, embed_dim, chunk_size=None, **kwargs):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.chunk_size = chunk_size
+    
+    def build(self, input_shape):
+        
+        # create necessary layers
+        self.projection = tf.keras.layers.Dense(self.embed_dim)
+        
+        self.position_embedding = tf.keras.layers.Embedding(
+            input_dim=input_shape[1],
+            output_dim=self.embed_dim,
+        )
+        
+        self.layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-5)
+        
+        if self.chunk_size is not None:
+            self.chunking_layer = tf.keras.layers.Reshape(
+                target_shape=(input_shape[1] // self.chunk_size, self.chunk_size, self.embed_dim),
+            )
+        
+        # a counter to get the index of the embedding position
+        self.positions = tf.range(start=0, limit=input_shape[1], delta=1)
+        
+        super().build(input_shape)
+
+    def call(self, inputs):
+        # project into the embedding dimension
+        outputs = self.projection(inputs)
+
+        # flatten and add positional encoding
+        outputs = outputs + self.position_embedding(self.positions)
+
+        # normalize the embedding vectors
+        outputs = self.layernorm(outputs)
+
+        # apply chunking if we have large sequences
+        outputs = self.chunking_layer(outputs) if self.chunk_size is not None else outputs
+
+        return outputs
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'embed_dim' : self.embed_dim,
+            'chunk_size' : self.chunk_size
+        })
+        return config
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class BaseAttention(tf.keras.layers.Layer):
+    def __init__(self, num_heads, dropout, **kwargs):
+        super().__init__(**kwargs)
+        
+        self.num_heads = num_heads
+        self.dropout = dropout
+
+    def build(self, input_shape):
+        
+        # input normalization layers
+        self.query_layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-5)
+        self.key_layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-5)
+        self.value_layernorm = tf.keras.layers.LayerNormalization(epsilon=1e-5)
+        
+        # main multi-head attention layer
+        self.multi_head_attention = tf.keras.layers.MultiHeadAttention(
+            num_heads=self.num_heads,
+            key_dim=input_shape[-1],
+            dropout=self.dropout,
+        )
+
+        self.attention_scores = None
+        
+        super().build(input_shape)
+        
+    def call(self, input_query, key, value):
+        # apply normalization of inputs
+        query = self.query_layernorm(input_query)
+        key = self.key_layernorm(key)
+        value = self.value_layernorm(value)
+        
+        # multihead attention
+        (attention_outputs, attention_scores) = self.multi_head_attention(
+            query=query,
+            key=key,
+            value=value,
+            return_attention_scores=True,
+        )
+
+        # save attention scores for visualization
+        self.attention_scores = attention_scores
+
+        # apply skip connection around attention block
+        return input_query + attention_outputs
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'num_heads' : self.num_heads,
+            'dropout' : self.dropout
+        })
+        return config
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class TransformerBlock(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        ffn_activation,
+        ffn_dropout,
+        ffn_projection_scale,
+        num_heads,
+        attn_dropout,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        
+        self.ffn_activation = ffn_activation
+        self.ffn_dropout = ffn_dropout
+        self.ffn_projection_scale = ffn_projection_scale
+        self.num_heads = num_heads
+        self.attn_dropout = attn_dropout
+        
+    def build(self, input_shape):
+        
+        # create the base multi head attention
+        self.attention = BaseAttention(
+            num_heads=self.num_heads,
+            dropout=self.attn_dropout,
+        )
+        
+        # followed by a resnet block
+        self.ffn = ResNetBlock(
+            activation=self.ffn_activation,
+            dropout=self.ffn_dropout, 
+            projection_scale=self.ffn_projection_scale,
+        )
+
+        self.attention_scores = None
+        
+        super().build(input_shape)
+
+    def call(self, query, key, value):
+        # apply the attention
+        outputs = self.attention(query, key, value)
+
+        # save the attention scores
+        self.attention_scores = self.attention.attention_scores
+
+        # run through the ffn layers
+        return self.ffn(outputs)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'ffn_activation' : self.ffn_activation,
+            'ffn_dropout' : self.ffn_dropout,
+            'ffn_projection_scale' : self.ffn_projection_scale,
+            'num_heads' : self.num_heads,
+            'attn_dropout' : self.attn_dropout
+        })
+        return config
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class Transformer(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        num_layers,
+        ffn_activation,
+        ffn_dropout,
+        ffn_projection_scale,
+        num_heads,
+        attn_dropout,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        
+        self.num_layers = num_layers
+        self.ffn_activation = ffn_activation
+        self.ffn_dropout = ffn_dropout
+        self.ffn_projection_scale = ffn_projection_scale
+        self.num_heads = num_heads
+        self.attn_dropout = attn_dropout
+        
+    def build(self, input_shape):
+
+        self.attention_scores = []
+
+        # build series of transformer blocks
+        perceptual_module = []
+        for layer_idx in range(self.num_layers):
+            perceptual_module.append(
+                TransformerBlock(
+                    ffn_activation=self.ffn_activation,
+                    ffn_dropout=self.ffn_dropout,
+                    ffn_projection_scale=self.ffn_projection_scale,
+                    num_heads=self.num_heads,
+                    attn_dropout=self.attn_dropout,
+                )
+            )
+        self.perceptual_module = perceptual_module
+        
+        super().build(input_shape)
+
+    def call(self, inputs):
+        for layer in self.perceptual_module:
+            inputs = layer(query=inputs, key=inputs, value=inputs)
+            self.attention_scores.append(layer.attention_scores)
+
+        return inputs
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'num_layers' : self.num_layers,
+            'ffn_activation' : self.ffn_activation,
+            'ffn_dropout' : self.ffn_dropout,
+            'ffn_projection_scale' : self.ffn_projection_scale,
+            'num_heads' : self.num_heads,
+            'attn_dropout' : self.attn_dropout
+        })
+        return config
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class TransformerRecurrentCell(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        chunk_size,
+        embed_dim,
+        xattn_rate,
+        num_layers,
+        ffn_activation,
+        ffn_dropout,
+        ffn_projection_scale,
+        num_heads,
+        attn_dropout,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        
+        self.chunk_size = chunk_size
+        self.embed_dim = embed_dim
+        self.xattn_rate = xattn_rate
+        self.num_layers = num_layers
+        self.ffn_activation = ffn_activation
+        self.ffn_dropout = ffn_dropout
+        self.ffn_projection_scale = ffn_projection_scale
+        self.num_heads = num_heads
+        self.attn_dropout = attn_dropout
+        
+        # create necessary state and output size for the recurrent cell
+        self.state_size = tf.TensorShape([self.chunk_size, embed_dim])
+        self.output_size = tf.TensorShape([self.chunk_size, embed_dim])
+        
+    def build(self, input_shape):
+
+        self.attention_scores = []
+
+        # perceptual module
+        perceptual_module = []
+        for layer_idx in range(self.num_layers):
+            perceptual_module.append(
+                TransformerBlock(
+                    ffn_activation=self.ffn_activation,
+                    ffn_dropout=self.ffn_dropout,
+                    ffn_projection_scale=self.ffn_projection_scale,
+                    num_heads=self.num_heads,
+                    attn_dropout=self.attn_dropout,
+                )
+            )
+            if layer_idx % self.xattn_rate == 0:
+                perceptual_module.append(
+                    TransformerBlock(
+                        ffn_activation=self.ffn_activation,
+                        ffn_dropout=self.ffn_dropout,
+                        ffn_projection_scale=self.ffn_projection_scale,
+                        num_heads=self.num_heads,
+                        attn_dropout=self.attn_dropout,
+                    )
+                )
+        self.perceptual_module = perceptual_module
+
+        # temporal latent bottleneck module
+        self.tlb_module = TransformerBlock(
+            ffn_activation=self.ffn_activation,
+            ffn_dropout=self.ffn_dropout,
+            ffn_projection_scale=self.ffn_projection_scale,
+            num_heads=self.num_heads,
+            attn_dropout=self.attn_dropout,
+        )
+        
+        super().build(input_shape)
+
+    def call(self, inputs, states):
+        # inputs => (batch, chunk_size, dims)
+        # states => [(batch, chunk_size, units)]
+        slow_stream = states[0]
+        fast_stream = inputs
+
+        for layer_idx, layer in enumerate(self.perceptual_module):
+            fast_stream = layer(query=fast_stream, key=fast_stream, value=fast_stream)
+
+            if layer_idx % self.xattn_rate == 0:
+                fast_stream = layer(
+                    query=fast_stream, key=slow_stream, value=slow_stream
+                )
+
+        slow_stream = self.tlb_module(
+            query=slow_stream, key=fast_stream, value=fast_stream
+        )
+
+        # save attention scores for visualization
+        self.attention_scores.append(self.tlb_module.attention_scores)
+
+        return fast_stream, [slow_stream]
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'chunk_size' : self.chunk_size,
+            'embed_dim' : self.embed_dim,
+            'xattn_rate' : self.xattn_rate,
+            'num_layers' : self.num_layers,
+            'ffn_activation' : self.ffn_activation,
+            'ffn_dropout' : self.ffn_dropout,
+            'ffn_projection_scale' : self.ffn_projection_scale,
+            'num_heads' : self.num_heads,
+            'attn_dropout' : self.attn_dropout
+        })
+        return config
