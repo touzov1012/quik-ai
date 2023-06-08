@@ -575,3 +575,216 @@ class ResNet(HyperModel):
         
         # return this body output
         return inputs
+
+class RNN(HyperModel):
+    
+    def __init__(
+        self,
+        response,
+        head,
+        predictors,
+        driver,
+        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        recurrent_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        recurrent_func=tuning.HyperChoice(['SimpleRNN','LSTM','GRU']),
+        name='RNN',
+        **kwargs
+    ):
+        super().__init__(name, response, head, predictors, driver, **kwargs)
+        
+        self.model_dim = model_dim
+        self.dropout = dropout
+        self.recurrent_dropout = recurrent_dropout
+        self.recurrent_func = recurrent_func
+    
+    def get_parameters(self, hp):
+        config = super().get_parameters(hp)
+        config.update({
+            'model_dim' : self._get_hp(None, 'model_dim', hp),
+            'dropout' : self._get_hp(None, 'dropout', hp),
+            'recurrent_dropout' : self._get_hp(None, 'recurrent_dropout', hp),
+            'recurrent_func' : self._get_hp(None, 'recurrent_func', hp),
+        })
+        return config
+    
+    def body(self, inputs, model_dim, dropout, recurrent_dropout, recurrent_func, **kwargs):
+        
+        # rnn needs second dimension to be time
+        if len(inputs.shape) <= 2:
+            inputs = tf.expand_dims(inputs, 1)
+            
+        if recurrent_func == 'SimpleRNN':
+            inputs = tf.keras.layers.SimpleRNN(model_dim, dropout=dropout, recurrent_dropout=recurrent_dropout)(inputs)
+        elif recurrent_func == 'LSTM':
+            inputs = tf.keras.layers.LSTM(model_dim, dropout=dropout, recurrent_dropout=recurrent_dropout)(inputs)
+        elif recurrent_func == 'GRU':
+            inputs = tf.keras.layers.GRU(model_dim, dropout=dropout, recurrent_dropout=recurrent_dropout)(inputs)
+        else:
+            backend.error('Recurrent function %s is not known!' % recurrent_func)
+        
+        # return this body output
+        return inputs
+    
+class Transformer(HyperModel):
+    
+    def __init__(
+        self,
+        response,
+        head,
+        predictors,
+        driver,
+        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        num_layers=tuning.HyperInt(min_value=1, max_value=6),
+        ffn_activation=tuning.HyperChoice(['relu','gelu']),
+        ffn_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        ffn_projection_scale=tuning.HyperInt(min_value=1, max_value=4),
+        num_heads=tuning.HyperInt(min_value=1, max_value=5),
+        attn_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        name='Transformer',
+        **kwargs
+    ):
+        super().__init__(name, response, head, predictors, driver, **kwargs)
+        
+        self.model_dim = model_dim
+        self.num_layers = num_layers
+        self.ffn_activation = ffn_activation
+        self.ffn_dropout = ffn_dropout
+        self.ffn_projection_scale = ffn_projection_scale
+        self.num_heads = num_heads
+        self.attn_dropout = attn_dropout
+    
+    def get_parameters(self, hp):
+        config = super().get_parameters(hp)
+        config.update({
+            'model_dim' : self._get_hp(None, 'model_dim', hp),
+            'num_layers' : self._get_hp(None, 'num_layers', hp),
+            'ffn_activation' : self._get_hp(None, 'ffn_activation', hp),
+            'ffn_dropout' : self._get_hp(None, 'ffn_dropout', hp),
+            'ffn_projection_scale' : self._get_hp(None, 'ffn_projection_scale', hp),
+            'num_heads' : self._get_hp(None, 'num_heads', hp),
+            'attn_dropout' : self._get_hp(None, 'attn_dropout', hp),
+        })
+        return config
+    
+    def body(
+        self, 
+        inputs, 
+        model_dim, 
+        num_layers, 
+        ffn_activation, 
+        ffn_dropout, 
+        ffn_projection_scale, 
+        num_heads, 
+        attn_dropout, 
+        **kwargs
+    ):
+        
+        # transformer needs data with at least 3 dimensions
+        if len(inputs.shape) <= 2:
+            inputs = tf.expand_dims(inputs, -1)
+            
+        # linear projection and positional encoding
+        inputs = layers.ChunkEmbedding(model_dim)(inputs)
+
+        # transformer layer
+        inputs = layers.Transformer(
+            num_layers=num_layers,
+            ffn_activation=ffn_activation,
+            ffn_dropout=ffn_dropout,
+            ffn_projection_scale=ffn_projection_scale,
+            num_heads=num_heads,
+            attn_dropout=attn_dropout,
+        )(inputs)
+        
+        # global average pool results
+        inputs = tf.keras.layers.GlobalAveragePooling1D()(inputs)
+        
+        # return this body output
+        return inputs
+
+class TransformerLong(HyperModel):
+    
+    def __init__(
+        self,
+        response,
+        head,
+        predictors,
+        driver,
+        chunk_size,
+        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        xattn_rate=tuning.HyperInt(min_value=2, max_value=4),
+        num_layers=tuning.HyperInt(min_value=1, max_value=6),
+        ffn_activation=tuning.HyperChoice(['relu','gelu']),
+        ffn_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        ffn_projection_scale=tuning.HyperInt(min_value=1, max_value=4),
+        num_heads=tuning.HyperInt(min_value=1, max_value=5),
+        attn_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
+        name='TransformerLong',
+        **kwargs
+    ):
+        super().__init__(name, response, head, predictors, driver, **kwargs)
+        
+        self.chunk_size = chunk_size
+        self.model_dim = model_dim
+        self.xattn_rate = xattn_rate
+        self.num_layers = num_layers
+        self.ffn_activation = ffn_activation
+        self.ffn_dropout = ffn_dropout
+        self.ffn_projection_scale = ffn_projection_scale
+        self.num_heads = num_heads
+        self.attn_dropout = attn_dropout
+    
+    def get_parameters(self, hp):
+        config = super().get_parameters(hp)
+        config.update({
+            'model_dim' : self._get_hp(None, 'model_dim', hp),
+            'xattn_rate' : self._get_hp(None, 'xattn_rate', hp),
+            'num_layers' : self._get_hp(None, 'num_layers', hp),
+            'ffn_activation' : self._get_hp(None, 'ffn_activation', hp),
+            'ffn_dropout' : self._get_hp(None, 'ffn_dropout', hp),
+            'ffn_projection_scale' : self._get_hp(None, 'ffn_projection_scale', hp),
+            'num_heads' : self._get_hp(None, 'num_heads', hp),
+            'attn_dropout' : self._get_hp(None, 'attn_dropout', hp),
+        })
+        return config
+    
+    def body(
+        self, 
+        inputs, 
+        model_dim, 
+        xattn_rate,
+        num_layers, 
+        ffn_activation, 
+        ffn_dropout, 
+        ffn_projection_scale, 
+        num_heads, 
+        attn_dropout, 
+        **kwargs
+    ):
+        
+        # transformer needs data with at least 3 dimensions
+        if len(inputs.shape) <= 2:
+            inputs = tf.expand_dims(inputs, -1)
+            
+        # linear projection and positional encoding
+        inputs = layers.ChunkEmbedding(model_dim, self.chunk_size)(inputs)
+
+        # transformer layer
+        inputs = tf.keras.layers.RNN(layers.TransformerRecurrentCell(
+            chunk_size=self.chunk_size,
+            model_dim=model_dim,
+            xattn_rate=xattn_rate,
+            num_layers=num_layers,
+            ffn_activation=ffn_activation,
+            ffn_dropout=ffn_dropout,
+            ffn_projection_scale=ffn_projection_scale,
+            num_heads=num_heads,
+            attn_dropout=attn_dropout,
+        ))(inputs)
+        
+        # global average pool results
+        inputs = tf.keras.layers.GlobalAveragePooling1D()(inputs)
+        
+        # return this body output
+        return inputs
