@@ -118,7 +118,7 @@ class PeriodicPredictor(LambdaPredictor):
         
         outputs = tf.concat(outputs, axis=-1)
         
-        theta = 2 * np.pi * outputs / self.get_parameters(hp)['period']
+        theta = 2 * np.pi * outputs / period
         
         return tf.concat([tf.math.sin(theta), tf.math.cos(theta)], axis=-1)
     
@@ -127,7 +127,7 @@ class TimeMaskedPredictor(LambdaPredictor):
         super().__init__(names, lambdas=self.body, **kwargs)
         self.mask_n = mask_n
     
-    def body(self, inputs, driver, period, **kwargs):
+    def body(self, inputs, driver, **kwargs):
         outputs = [inputs[name] for name in self.names]
         
         outputs = tf.concat(outputs, axis=-1)

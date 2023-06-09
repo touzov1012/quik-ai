@@ -14,7 +14,7 @@ class Driver(tuning.Tunable):
         training_data, 
         validation_data, 
         testing_data, 
-        optimizer,
+        optimizer='adam',
         max_steps_per_epoch=None,
         weights_column=None,
         time_group_column=None,
@@ -45,7 +45,8 @@ class Driver(tuning.Tunable):
     
     def get_dependent_tunables(self):
         tunables = super().get_dependent_tunables()
-        tunables.extend(self.optimizer.get_dependent_tunables())
+        if isinstance(self.optimizer, tuning.Tunable):
+            tunables.extend(self.optimizer.get_dependent_tunables())
         return tunables
     
     def get_training_data(self, columns=None):

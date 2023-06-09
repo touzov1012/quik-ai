@@ -273,7 +273,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
     ):
         # if no tuner, set the default option
         if tuner_container is None:
-            tuner_container = tuners.TunerContainer(kt.Hyperband)
+            tuner_container = tuners.TunerContainer(tuners.BOHB)
         
         # create working directory for the build
         build_dir = backend.create_unique_dir(working_dir=working_dir)
@@ -426,11 +426,15 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         
         return self.instance.predict(tdf)
     
-    def evaluate(self, data):
+    def evaluate(self, data=None):
         
         if self.instance is None:
             backend.error('Cannot evaluate for a NULL instance. Make sure you train the model before invoking.')
             return None
+        
+        # default to the test set
+        if data is None:
+            data = self.driver.testing_data
         
         # build the input dataset from the numpy array
         tdf = self.driver.get_tensorflow_dataset(
@@ -529,7 +533,7 @@ class ResNet(HyperModel):
         head,
         predictors,
         driver,
-        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        model_dim=tuning.HyperChoice([4, 8, 16, 32, 64, 128, 256, 512]),
         blocks=tuning.HyperInt(min_value=0, max_value=6),
         activation=tuning.HyperChoice(['relu','gelu']),
         dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
@@ -584,7 +588,7 @@ class RNN(HyperModel):
         head,
         predictors,
         driver,
-        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        model_dim=tuning.HyperChoice([4, 8, 16, 32, 64, 128, 256, 512]),
         dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
         recurrent_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
         recurrent_func=tuning.HyperChoice(['SimpleRNN','LSTM','GRU']),
@@ -634,7 +638,7 @@ class Transformer(HyperModel):
         head,
         predictors,
         driver,
-        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        model_dim=tuning.HyperChoice([4, 8, 16, 32, 64, 128, 256, 512]),
         num_layers=tuning.HyperInt(min_value=1, max_value=6),
         ffn_activation=tuning.HyperChoice(['relu','gelu']),
         ffn_dropout=tuning.HyperFloat(min_value=0.0, max_value=0.4, step=0.1),
@@ -712,7 +716,7 @@ class TransformerLong(HyperModel):
         predictors,
         driver,
         chunk_size,
-        model_dim=tuning.HyperInt(min_value=32, max_value=512, step=32),
+        model_dim=tuning.HyperChoice([4, 8, 16, 32, 64, 128, 256, 512]),
         xattn_rate=tuning.HyperInt(min_value=2, max_value=4),
         num_layers=tuning.HyperInt(min_value=1, max_value=6),
         ffn_activation=tuning.HyperChoice(['relu','gelu']),
