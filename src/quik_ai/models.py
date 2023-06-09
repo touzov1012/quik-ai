@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
 import os
 import pickle
 import tensorflow as tf
+import tensorflow_probability as tfp
 import keras_tuner as kt
 import numpy as np
 import pandas as pd
@@ -407,7 +408,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         # store the model instance
         self.instance = model
     
-    def predict(self, data):
+    def predict(self, data, verbose=1):
         
         if self.instance is None:
             backend.error('Cannot predict for a NULL instance. Make sure you train the model before invoking.')
@@ -424,7 +425,47 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             shuffle=False
         )
         
-        return self.instance.predict(tdf)
+        return self.instance.predict(tdf, verbose=verbose)
+    
+    def predict_distribution(self, data, samples):
+        
+        if self.instance is None:
+            backend.error('Cannot predict for a NULL instance. Make sure you train the model before invoking.')
+            return None
+        
+        # build the input dataset from the numpy array
+        tdf = self.driver.get_tensorflow_dataset(
+            data, 
+            input_names=self.get_input_names(), 
+            response=None, 
+            run_forever=False, 
+            time_window=self.time_window, 
+            hp=None, 
+            shuffle=False
+        )
+        
+        # get outputs for each data point
+        outputs = []
+        for x in tdf:
+            outputs.append(self.instance(x))
+        
+        # if we do not have a distribution layer
+        if not isinstance(outputs[0], tfp.distributions.Distribution):
+            backend.error('Cannot predict distribution for a non-density model. Make sure you choose the right model head.')
+            return None
+        
+        # get array for final results
+        results = []
+
+        # for each value in the samples, calculate the prob of the distribution
+        for value in samples:
+            batch = []
+            for output in outputs:
+                batch.append(tf.exp(output.log_prob(value)))
+            results.append(tf.concat(batch, 0))
+
+        # concat results along the second axis
+        return tf.stack(results, axis=-1)
     
     def evaluate(self, data=None):
         
