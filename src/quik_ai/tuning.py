@@ -2,7 +2,7 @@ class NullScope():
     def __init__(self):
         pass
     def __enter__(self):
-        pass
+        return self
     def __exit__(self, type, value, traceback):
         pass
 
@@ -10,7 +10,7 @@ class FixedScope():
     def __init__(self):
         pass
     def __enter__(self):
-        pass
+        return self
     def __exit__(self, type, value, traceback):
         pass
 

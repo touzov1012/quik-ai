@@ -9,7 +9,7 @@ except ImportError:  # pragma: no cover
     mlflow = None  # pragma: no cover
 
 import os
-import pickle
+import cloudpickle
 import tensorflow as tf
 import tensorflow_probability as tfp
 import keras_tuner as kt
@@ -56,7 +56,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
 
         # load other attributes
         with open(backend.join_path(filepath, 'model.pkl'), 'rb') as f:
-            data = pickle.load(f)
+            data = cloudpickle.load(f)
 
         attrs = data['attrs']
         class_name = data['class_name']
@@ -78,7 +78,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         if self.instance is not None:
             self.instance.save(backend.join_path(filepath, 'tf_model'))
 
-        # save other attributes with pickle
+        # save other attributes with cloudpickle
         attrs = {name: attr for name, attr in self.__dict__.items() if name != 'instance' and not callable(attr) and not name.startswith('_')}
         data = {
             'class_name': self.__class__.__name__,
@@ -86,7 +86,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         }
         
         with open(backend.join_path(filepath, 'model.pkl'), 'wb') as f:
-            pickle.dump(data, f)
+            cloudpickle.dump(data, f)
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
@@ -467,7 +467,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         # concat results along the second axis
         return tf.stack(results, axis=-1)
     
-    def evaluate(self, data=None):
+    def evaluate(self, data=None, verbose=1):
         
         if self.instance is None:
             backend.error('Cannot evaluate for a NULL instance. Make sure you train the model before invoking.')
@@ -489,7 +489,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         )
         
         # evalute the results
-        evals = self.instance.evaluate(tdf)
+        evals = self.instance.evaluate(tdf, verbose=verbose)
         
         # pair each result with the metric name
         res = {}
@@ -498,7 +498,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         
         return res
     
-    def report(self, filepath='./model'):
+    def report(self, filepath='./model', verbose=0):
         
         if self.instance is None:
             backend.error('Cannot report for a NULL instance. Make sure you train the model before invoking.')
@@ -534,7 +534,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
 
         # save full model scores
         if self.driver is not None and self.driver.testing_data is not None:
-            scores = self.evaluate(self.driver.testing_data)
+            scores = self.evaluate(self.driver.testing_data, verbose=verbose)
             scores = pd.DataFrame(list(scores.items()), columns=['Metric', 'Value'])
             lines.append('#### Test performance:\n\n')
             lines.append('%s\n\n' % scores.to_markdown(index=False))
