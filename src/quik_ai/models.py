@@ -268,7 +268,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         tuner_container=None,
         early_stopping_tune=10, 
         early_stopping_full=10,
-        full_rounds=5,
+        full_rounds=1,
         working_dir='.', 
         verbose=1
     ):
