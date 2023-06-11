@@ -20,7 +20,7 @@ class Predictor(tuning.Tunable):
     def transform(self, inputs, driver, hp):
         return None
 
-class LambdaPredictor(Predictor):
+class Lambda(Predictor):
     def __init__(self, names, lambdas=None, **kwargs):
         super().__init__(names, **kwargs)
         
@@ -72,7 +72,7 @@ class LambdaPredictor(Predictor):
         
         return tf.concat(res, axis=-1)
     
-class NumericalPredictor(LambdaPredictor):
+class Numerical(Lambda):
     def __init__(self, names, normalize=False, **kwargs):
         super().__init__(names, lambdas=self.body, **kwargs)
         self.normalize = normalize
@@ -100,7 +100,7 @@ class NumericalPredictor(LambdaPredictor):
         
         return tf.concat(outputs, axis=-1)
 
-class PeriodicPredictor(LambdaPredictor):
+class Periodic(Lambda):
     def __init__(self, names, period, **kwargs):
         super().__init__(names, lambdas=self.body, **kwargs)
         self.period = period
@@ -122,7 +122,7 @@ class PeriodicPredictor(LambdaPredictor):
         
         return tf.concat([tf.math.sin(theta), tf.math.cos(theta)], axis=-1)
     
-class TimeMaskedPredictor(LambdaPredictor):
+class TimeMasked(Lambda):
     def __init__(self, names, mask_n=1, **kwargs):
         super().__init__(names, lambdas=self.body, **kwargs)
         self.mask_n = mask_n
@@ -140,7 +140,7 @@ class TimeMaskedPredictor(LambdaPredictor):
         
         return tf.concat([unmasked, masked], axis=1)
 
-class CategoricalPredictor(LambdaPredictor):
+class Categorical(Lambda):
     def __init__(
         self, 
         names, 
