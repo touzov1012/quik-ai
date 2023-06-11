@@ -22,9 +22,9 @@ head = qa.heads.GaussianMixture()
 ```python
 # All the predictors for the model.
 predictors = [
-    qa.predictors.NumericalPredictor('numerical'),
-    qa.predictors.CategoricalPredictor('categorical'),
-    qa.predictors.PeriodicPredictor('periodic', 24.0),
+    qa.predictors.Numerical('numerical'),
+    qa.predictors.Categorical('categorical'),
+    qa.predictors.Periodic('periodic', 24.0),
 ]
 ```
 
