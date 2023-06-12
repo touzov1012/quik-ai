@@ -92,7 +92,7 @@ class Numerical(Lambda):
         if normalize:
             for name in self.names:
                 normal_layer = tf.keras.layers.Normalization()
-                normal_layer.adapt(driver.get_training_data(name))
+                normal_layer.adapt(driver.get_data_tensor(driver.training_data, name))
                 outputs.append(normal_layer(inputs[name]))
         else:
             for name in self.names:
@@ -200,7 +200,7 @@ class Categorical(Lambda):
             
             # encode to numeric
             encode_layer = tf.keras.layers.StringLookup(oov_token=self.dropout_token)
-            encode_layer.adapt(driver.get_training_data(self.names[i]))
+            encode_layer.adapt(driver.get_data_tensor(driver.training_data, self.names[i]))
             outputs[i] = encode_layer(outputs[i])
             
             # get the vocab size for this input

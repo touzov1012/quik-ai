@@ -122,11 +122,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         
         for name in input_names:
             dtype = self.driver.get_input_dtype(name)
-            shape = self.driver.get_input_shape(name)
-
-            # append time dimension
-            if time_window > 1:
-                shape = (time_window,) + shape
+            shape = self.driver.get_input_shape(name, time_window)
 
             input_layers[name] = tf.keras.Input(name=name, dtype=dtype, shape=shape)
         

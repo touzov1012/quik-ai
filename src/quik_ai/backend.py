@@ -69,7 +69,9 @@ def get_k_from_end(data, k, fill=0):
     if rows >= k:
         return data[-k:]
     else:
-        pad_rows = np.full((k-rows, data.shape[1]), fill) if len(data.shape) > 1 else np.full((k-rows,), fill)
+        fill_shape = list(data.shape)
+        fill_shape[0] = k-rows
+        pad_rows = np.full(fill_shape, fill)
         return np.concatenate((pad_rows, data), axis=0)
 
 def train_val_test_split(df, p=[0.8,0.1,0.1]):

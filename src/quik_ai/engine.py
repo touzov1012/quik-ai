@@ -49,27 +49,37 @@ class Driver(tuning.Tunable):
             tunables.extend(self.optimizer.get_dependent_tunables())
         return tunables
     
-    def get_training_data(self, columns=None):
-        if columns is None:
-            return self.training_data
-        return self.training_data[columns]
-    
-    def get_validation_data(self, columns=None):
-        if columns is None:
-            return self.validation_data
-        return self.validation_data[columns]
-    
-    def get_testing_data(self, columns=None):
-        if columns is None:
-            return self.testing_data
-        return self.testing_data[columns]
+    def get_data_tensor(self, data, columns):
+        if not isinstance(columns, (list, tuple)):
+            columns = [columns]
+
+        # convert to numpy
+        arr = data[columns].to_numpy()
+
+        # first, we reshape the 2D array to a 1D array
+        arr_reshaped = arr.reshape(-1)
+
+        # then, we stack the 2D arrays along new dimensions
+        result = np.stack(arr_reshaped)
+
+        # reshape the result back to the desired shape
+        entry_shape = arr[0,0].shape if not isinstance(arr[0,0], str) else ()
+        result = result.reshape(*arr.shape, *entry_shape)
+
+        return result
     
     def get_input_dtype(self, column):
-        return tf.float32 if self.training_data[column].dtype.kind in 'iufcb' else tf.string
+        cell = self.training_data[column].iloc[0]
+        if isinstance(cell, str):
+            return tf.string
+        return tf.float32 if cell.flatten()[0].dtype.kind in 'iufcb' else tf.string
     
-    def get_input_shape(self, column):
-        # todo: add vector support
-        return (1,)
+    def get_input_shape(self, column, time_window):
+        cell = self.training_data[column].iloc[0]
+        if isinstance(cell, str):
+            return (1,) if time_window <= 1 else (time_window, 1)
+        shape = cell.shape if len(cell.shape) > 0 else (1,)
+        return shape if time_window <= 1 else (time_window,) + shape
     
     def get_optimizer(self, hp):
         if isinstance(self.optimizer, optimizers.Optimizer):
@@ -86,16 +96,15 @@ class Driver(tuning.Tunable):
     def get_validation_steps_per_epoch(self, hp):
         return max(self.validation_data.shape[0] // self.get_parameters(hp)['batch_size'], 1)
     
-    def __get_partitioned_data(self, data, input_names, response):
+    def __get_partitioned_data(self, data, input_names, response, time_window):
         
-        # cache the names of the columns
-        names_flt = []
-        names_str = []
+        # cache the names of the columns corresponding to each tensor type
+        names_map = {}
         for name in input_names:
-            if self.get_input_dtype(name) == tf.string:
-                names_str.append(name)
-            else:
-                names_flt.append(name)
+            key = (self.get_input_dtype(name), self.get_input_shape(name, time_window))
+            array = names_map.get(key,[])
+            array.append(name)
+            names_map[key] = array
         
         # the array may be shuffled, but the index of the true order remains
         # we need to build a map to the locations of the new ordered elements
@@ -111,8 +120,9 @@ class Driver(tuning.Tunable):
         group_order = data.__group_id__.to_numpy() if self.time_group_column is not None else None
         
         # get the str and float parts of the new_data
-        x_flt = data[names_flt].astype(np.float32).to_numpy()
-        x_str = data[names_str].astype(str).to_numpy()
+        tensor_map = {}
+        for key, value in names_map.items():
+            tensor_map[key] = self.get_data_tensor(data, value)
         
         # generate y and w if we have them
         y = data[response].to_numpy() if response is not None else None
@@ -124,10 +134,8 @@ class Driver(tuning.Tunable):
         return {
             'row_order' : row_order,
             'group_order' : group_order,
-            'names_flt' : names_flt,
-            'names_str' : names_str,
-            'x_flt' : x_flt,
-            'x_str' : x_str,
+            'names_map' : names_map,
+            'tensor_map' : tensor_map,
             'y' : y,
             'w' : w,
         }
@@ -155,10 +163,13 @@ class Driver(tuning.Tunable):
         # split the data into different type tensors and get the
         # order of the rows as well as the element of the row in
         # each group if we have a time group
-        cache = self.__get_partitioned_data(data, input_names, response)
+        cache = self.__get_partitioned_data(data, input_names, response, time_window)
         
         # get the order of our results
         row_order = cache['row_order']
+        
+        # sliced tensor input
+        sliced_tensors = {}
         
         # build the generator
         def generator():
@@ -170,43 +181,44 @@ class Driver(tuning.Tunable):
                 # yield loop to iterate over the data
                 for end in row_order:
                     
+                    # clear the previous slices
+                    sliced_tensors.clear()
+                    
                     # filter to sub-array depending on if we have a time group
                     if self.time_group_column is None:
-                        x_flt = cache['x_flt'][:end+1]
-                        x_str = cache['x_str'][:end+1]
-                        y = cache['y'][:end+1] if cache['y'] is not None else None
-                        w = cache['w'][:end+1] if cache['w'] is not None else None
+                        for key, value in cache['tensor_map'].items():
+                            sliced_tensors[key] = value[:end+1]
                     else:
                         group_id = cache['group_order'][end]
-                        x_flt = cache['x_flt'][end-group_id:end+1]
-                        x_str = cache['x_str'][end-group_id:end+1]
-                        y = cache['y'][end-group_id:end+1] if cache['y'] is not None else None
-                        w = cache['w'][end-group_id:end+1] if cache['w'] is not None else None
+                        for key, value in cache['tensor_map'].items():
+                            sliced_tensors[key] = value[end-group_id:end+1]
 
                     # different fetch for time series and flat array, we may need to pad
                     # the time series if it there is not enough history
-                    if time_window >= 2:
-                        x_flt = backend.get_k_from_end(x_flt, time_window, fill=0)
-                        x_str = backend.get_k_from_end(x_str, time_window, fill='[UNK]')
-                    else:
-                        x_flt = x_flt[-1]
-                        x_str = x_str[-1]
+                    for key in sliced_tensors.keys():
+                        fill_type = '[UNK]' if key[0] == tf.string else 0
+                        sliced_tensors[key] = backend.get_k_from_end(sliced_tensors[key], time_window, fill=fill_type)
                         
                     # combine the predictor names
-                    x_keys = [*cache['names_flt'], *cache['names_str']]
+                    x_keys = []
+                    for value in cache['names_map'].values():
+                        x_keys += value
                     
                     # combine the predictor vectors
-                    x_flt_vals = [] if x_flt.shape[-1] == 0 else np.split(x_flt, x_flt.shape[-1], axis=-1)
-                    x_str_vals = [] if x_str.shape[-1] == 0 else np.split(x_str, x_str.shape[-1], axis=-1)
-                    x_vals = [*x_flt_vals, *x_str_vals]
+                    x_values = []
+                    for key, value in sliced_tensors.items():
+                        splits = np.split(value, value.shape[1], axis=1)
+                        for split in splits:
+                            squeezed = np.squeeze(split, axis=(0,1)) if time_window <= 1 else np.squeeze(split, axis=1)
+                            x_values.append(np.reshape(squeezed, key[1]))
                     
-                    if y is None:
-                        yield dict(zip(x_keys, x_vals))
+                    if cache['y'] is None:
+                        yield dict(zip(x_keys, x_values))
                     else:
-                        if w is None:
-                            yield (dict(zip(x_keys, x_vals)), y[-1])
+                        if cache['w'] is None:
+                            yield (dict(zip(x_keys, x_values)), cache['y'][end])
                         else:
-                            yield (dict(zip(x_keys, x_vals)), y[-1], w[-1])
+                            yield (dict(zip(x_keys, x_values)), cache['y'][end], cache['w'][end])
                 
                 # should we terminate the forever loop for a single data pass?
                 if not run_forever:
@@ -218,11 +230,7 @@ class Driver(tuning.Tunable):
         input_tensor_specs = []
         for name in input_names:
             dtype = self.get_input_dtype(name)
-            shape = self.get_input_shape(name)
-
-            # append time dimension
-            if time_window > 1:
-                shape = (time_window,) + shape
+            shape = self.get_input_shape(name, time_window)
             
             input_tensor_specs.append(tf.TensorSpec(shape=shape, dtype=dtype))
         
