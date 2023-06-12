@@ -200,7 +200,7 @@ class Categorical(Lambda):
             
             # encode to numeric
             encode_layer = tf.keras.layers.StringLookup(oov_token=self.dropout_token)
-            encode_layer.adapt(driver.get_data_tensor(driver.training_data, self.names[i]))
+            encode_layer.adapt(np.unique(driver.get_data_tensor(driver.training_data, self.names[i])))
             outputs[i] = encode_layer(outputs[i])
             
             # get the vocab size for this input

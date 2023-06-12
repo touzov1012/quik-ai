@@ -50,6 +50,14 @@ class Driver(tuning.Tunable):
         return tunables
     
     def get_data_tensor(self, data, columns):
+        '''
+        Build a tensor from the input, the result will 
+        be shape (n_rows, n_columns, common_element_shape)
+        
+        data:      the pandas array
+        columns:   the columns to extract from the array
+        '''
+        
         if not isinstance(columns, (list, tuple)):
             columns = [columns]
 
