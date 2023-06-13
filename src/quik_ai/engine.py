@@ -133,7 +133,7 @@ class Driver(tuning.Tunable):
             tensor_map[key] = self.get_data_tensor(data, value)
         
         # generate y and w if we have them
-        y = data[response].to_numpy() if response is not None else None
+        y = np.squeeze(self.get_data_tensor(data, response), axis=1) if response is not None else None
         w = data[self.weights_column].to_numpy() if self.weights_column is not None else None
         
         # remove w if no response
@@ -247,10 +247,16 @@ class Driver(tuning.Tunable):
 
         # append the response and weights
         if cache['y'] is not None:
-            if cache['w'] is None:
-                output_signature = (output_signature, tf.TensorSpec(shape=(), dtype=tf.float32))
-            else:
-                output_signature = (output_signature, tf.TensorSpec(shape=(), dtype=tf.float32), tf.TensorSpec(shape=(), dtype=tf.float32))
+            # get the response shape
+            response_shape = self.get_input_shape(response, 1)
+            response_shape = () if response_shape == (1,) else response_shape
+            
+            # append to the signature
+            output_signature = (output_signature, tf.TensorSpec(shape=response_shape, dtype=self.get_input_dtype(response)))
+        
+        # append the weights to the signature
+        if cache['w'] is not None:
+            output_signature += (tf.TensorSpec(shape=(), dtype=tf.float32),)
         
         # return the built generator
         return tf.data.Dataset.from_generator(
