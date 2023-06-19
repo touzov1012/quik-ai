@@ -193,6 +193,9 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         if hp is None:
             hp = kt.HyperParameters()
         
+        # cache parameters of driver
+        self.driver.get_parameters(hp)
+        
         # get parameters
         config = self.get_parameters(hp)
         
