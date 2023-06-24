@@ -145,9 +145,14 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         # remove dropped inputs
         inputs = [x for x in inputs if x is not None]
         
-        # unify dimensions if we have no time
-        if time_window <= 1:
+        # if we do not have a time dimension, then we either flatten and concat all inputs
+        # or we leave the singular input in its desired form. If we do have a time dimension
+        # then we time flatten all inputs
+        if time_window <= 1 and len(inputs) > 1:
             inputs = [tf.keras.layers.Flatten()(x) for x in inputs]
+        elif time_window > 1 and len(inputs) > 0:
+            # we have a time component, so we need to time flatten everything
+            inputs = [layers.TimeFlatten(time_window)(x) for x in inputs]
         
         # if all inputs are dropped, we replace with a constant
         if not inputs:
