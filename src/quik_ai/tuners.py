@@ -18,14 +18,6 @@ from keras_tuner.engine import tuner as tuner_module
 from keras_tuner.tuners import hyperband as hyperband_module
 from keras_tuner.tuners import bayesian as bayesian_module
 
-class TunerContainer:
-    def __init__(self, tuner, **kwargs):
-        self.tuner = tuner
-        self.kwargs = kwargs
-        
-    def get_tuner_params(self):
-        return self.kwargs.copy()
-
 class BOHBOracle(hyperband_module.HyperbandOracle):
 
     def __init__(

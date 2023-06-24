@@ -264,16 +264,14 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
     
     def train(
         self,
-        tuner_container=None,
+        tuner=tuners.BOHB,
         early_stopping_tune=10, 
         early_stopping_full=10,
         full_rounds=1,
-        working_dir='.', 
+        working_dir='./tmp', 
+        tuner_params={},
         verbose=1
     ):
-        # if no tuner, set the default option
-        if tuner_container is None:
-            tuner_container = tuners.TunerContainer(tuners.BOHB)
         
         # create working directory for the build
         build_dir = backend.create_unique_dir(working_dir=working_dir)
@@ -284,9 +282,8 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         checkpoint_monitor = 'val_' + self.head.monitor()
 
         # create the tuner
-        tuner_params = tuner_container.get_tuner_params()
         tuner_epochs = tuner_params.pop('epochs', 1)
-        tuner = tuner_container.tuner(
+        tuner = tuner(
             self, 
             objective=kt.Objective(checkpoint_monitor, direction=self.head.objective_direction),
             directory=backend.join_path(build_dir, 'tuner'),
