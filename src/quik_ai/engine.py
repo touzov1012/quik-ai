@@ -6,6 +6,7 @@ import tensorflow as tf
 import keras_tuner as kt
 import numpy as np
 import pandas as pd
+import os
 
 class Driver(tuning.Tunable):
     
@@ -20,6 +21,7 @@ class Driver(tuning.Tunable):
         time_group_column=None,
         shuffle=True,
         batch_size=tuning.HyperChoice([64, 128, 256, 512, 1024, 2048, 4096]),
+        working_dir='./tmp', 
         **kwargs
     ):
         super().__init__('Driver', **kwargs)
@@ -34,6 +36,8 @@ class Driver(tuning.Tunable):
         
         self.shuffle = shuffle
         self.batch_size = batch_size
+        self.working_dir = working_dir
+        self.file_dir = backend.create_unique_dir(working_dir=self.working_dir)
     
     def get_parameters(self, hp):
         config = super().get_parameters(hp)
@@ -97,12 +101,9 @@ class Driver(tuning.Tunable):
     
     def get_training_steps_per_epoch(self, hp):
         steps_per_epoch = max(self.training_data.shape[0] // self.get_parameters(hp)['batch_size'], 1)
-        if self.max_steps_per_epoch is not None:
-            return min(self.max_steps_per_epoch, steps_per_epoch)
-        return steps_per_epoch
-    
-    def get_validation_steps_per_epoch(self, hp):
-        return max(self.validation_data.shape[0] // self.get_parameters(hp)['batch_size'], 1)
+        if self.max_steps_per_epoch is not None and self.max_steps_per_epoch < steps_per_epoch:
+            return self.max_steps_per_epoch
+        return None
     
     def __get_partitioned_data(self, data, input_names, response, time_window):
         
@@ -133,8 +134,8 @@ class Driver(tuning.Tunable):
             tensor_map[key] = self.get_data_tensor(data, value)
         
         # generate y and w if we have them
-        y = np.squeeze(self.get_data_tensor(data, response), axis=1) if response is not None else None
-        w = data[self.weights_column].to_numpy() if self.weights_column is not None else None
+        y = np.float32(np.squeeze(self.get_data_tensor(data, response), axis=1)) if response is not None else None
+        w = data[self.weights_column].to_numpy(dtype=np.float32) if self.weights_column is not None else None
         
         # remove w if no response
         w = None if y is None else w
@@ -148,50 +149,78 @@ class Driver(tuning.Tunable):
             'w' : w,
         }
     
+    def __bytes_feature(self, value):
+        if isinstance(value, type(tf.constant(0))):
+            value = value.numpy()
+        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[tf.io.serialize_tensor(value).numpy()]))
+    
+    def __float_feature(self, value):
+        return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
+    
+    def __serialize_example(self, x, y=None, w=None):
+        input_features = {name: self.__bytes_feature(tensor) for name, tensor in x.items()}
+        if y is not None:
+            input_features['__response__'] = self.__bytes_feature(y)
+        if w is not None:
+            input_features['__weights__'] = self.__float_feature(w)
+        example_proto = tf.train.Example(features=tf.train.Features(feature=input_features))
+        return example_proto.SerializeToString()
+    
     def __get_tensorflow_generator(
         self, 
         data, 
         input_names, 
         response, 
-        run_forever,
         time_window, 
-        batch_size, 
+        batch_size,
         shuffle, 
+        name,
+        reinit=True,
         **kwargs
     ):  
-        # presort by index
-        data = data.sort_index()
+        # file name
+        filepath = backend.join_path(self.file_dir, '%s.tfrecords' % name)
         
-        # if we have a time group, first sort by group
-        if self.time_group_column is not None:
-            data = data.reset_index().rename(columns={'index': '__group_id__'})
-            data = data.sort_values(by=[self.time_group_column, '__group_id__'])
-            data['__group_id__'] = data.groupby(self.time_group_column).cumcount()
-        
-        # split the data into different type tensors and get the
-        # order of the rows as well as the element of the row in
-        # each group if we have a time group
-        cache = self.__get_partitioned_data(data, input_names, response, time_window)
-        
-        # get the order of our results
-        row_order = cache['row_order']
-        
-        # sliced tensor input
-        sliced_tensors = {}
-        
-        # build the generator
-        def generator():
-            while True:
-                # shuffle if we need to
-                if shuffle:
-                    np.random.shuffle(row_order)
+        # check if we already have this record dataset
+        # if we do, and we want to reinit, then delete it
+        if not os.path.exists(filepath) or reinit:
+            
+            # presort by index
+            data = data.sort_index()
 
-                # yield loop to iterate over the data
+            # if we have a time group, first sort by group
+            if self.time_group_column is not None:
+                data = data.reset_index().rename(columns={'index': '__group_id__'})
+                data = data.sort_values(by=[self.time_group_column, '__group_id__'])
+                data['__group_id__'] = data.groupby(self.time_group_column).cumcount()
+
+            # split the data into different type tensors and get the
+            # order of the rows as well as the element of the row in
+            # each group if we have a time group
+            cache = self.__get_partitioned_data(data, input_names, response, time_window)
+
+            # get the order of our results
+            row_order = cache['row_order']
+
+            # sliced tensor input
+            sliced_tensors = {}
+
+            # shuffle if we need to
+            if shuffle:
+                np.random.shuffle(row_order)
+
+            # combine the predictor names
+            x_keys = []
+            for value in cache['names_map'].values():
+                x_keys += value
+                
+            # yield loop to iterate over the data
+            with tf.io.TFRecordWriter(filepath) as writer:
                 for end in row_order:
-                    
+
                     # clear the previous slices
                     sliced_tensors.clear()
-                    
+
                     # filter to sub-array depending on if we have a time group
                     if self.time_group_column is None:
                         for key, value in cache['tensor_map'].items():
@@ -206,84 +235,103 @@ class Driver(tuning.Tunable):
                     for key in sliced_tensors.keys():
                         fill_type = '[UNK]' if key[0] == tf.string else 0
                         sliced_tensors[key] = backend.get_k_from_end(sliced_tensors[key], time_window, fill=fill_type)
-                        
-                    # combine the predictor names
-                    x_keys = []
-                    for value in cache['names_map'].values():
-                        x_keys += value
-                    
+
                     # combine the predictor vectors
                     x_values = []
                     for key, value in sliced_tensors.items():
                         splits = np.split(value, value.shape[1], axis=1)
                         for split in splits:
                             squeezed = np.squeeze(split, axis=(0,1)) if time_window <= 1 else np.squeeze(split, axis=1)
-                            x_values.append(np.reshape(squeezed, key[1]))
-                    
-                    if cache['y'] is None:
-                        yield dict(zip(x_keys, x_values))
-                    else:
-                        if cache['w'] is None:
-                            yield (dict(zip(x_keys, x_values)), cache['y'][end])
-                        else:
-                            yield (dict(zip(x_keys, x_values)), cache['y'][end], cache['w'][end])
-                
-                # should we terminate the forever loop for a single data pass?
-                if not run_forever:
-                    break
-        
-        # we either have a time series or not, if we have a time series
-        # we will use the generator to get data to avoid memory overflow
-        # otherwise we can use the full data without processing
-        input_tensor_specs = []
-        for name in input_names:
-            dtype = self.get_input_dtype(name)
-            shape = self.get_input_shape(name, time_window)
-            
-            input_tensor_specs.append(tf.TensorSpec(shape=shape, dtype=dtype))
-        
-        # build the signature
-        output_signature = dict(zip(input_names, input_tensor_specs))
+                            squeezed = np.reshape(squeezed, key[1])
+                            x_values.append(tf.convert_to_tensor(squeezed, dtype=key[0]))
 
-        # append the response and weights
-        if cache['y'] is not None:
-            # get the response shape
-            response_shape = self.get_input_shape(response, 1)
-            response_shape = () if response_shape == (1,) else response_shape
+                    if cache['y'] is None:
+                        example = self.__serialize_example(dict(zip(x_keys, x_values)))
+                    elif cache['w'] is None:
+                        example = self.__serialize_example(dict(zip(x_keys, x_values)), cache['y'][end])
+                    else:
+                        example = self.__serialize_example(dict(zip(x_keys, x_values)), cache['y'][end], cache['w'][end])
+                    
+                    # write the observation
+                    writer.write(example)
             
-            # append to the signature
-            output_signature = (output_signature, tf.TensorSpec(shape=response_shape, dtype=self.get_input_dtype(response)))
+        # create the raw data
+        raw_dataset = tf.data.TFRecordDataset(filepath)
         
-        # append the weights to the signature
-        if cache['w'] is not None:
-            output_signature += (tf.TensorSpec(shape=(), dtype=tf.float32),)
+        # create the description of each feature
+        feature_description = {key: tf.io.FixedLenFeature([], tf.string) for key in input_names}
+        if response is not None:
+            feature_description['__response__'] = tf.io.FixedLenFeature([], tf.string)
+        if self.weights_column is not None and response is not None:
+            feature_description['__weights__'] = tf.io.FixedLenFeature([], tf.float32)
         
-        # return the built generator
-        return tf.data.Dataset.from_generator(
-            generator,
-            output_signature=output_signature
-        )
+        # create a mapping to parse our serialized data
+        def _parse_function(example_proto):
+            features = tf.io.parse_single_example(example_proto, feature_description)
+            inputs = {name: tf.io.parse_tensor(features[name], out_type=self.get_input_dtype(name)) 
+                      for name in features if name != '__response__' and name != '__weights__'}
+            if response is None:
+                return inputs
+            elif self.weights_column is None:
+                return inputs, tf.io.parse_tensor(features['__response__'], out_type=tf.float32)
+            else:
+                return inputs, tf.io.parse_tensor(features['__response__'], out_type=tf.float32), features['__weights__']
+        
+        # return the deserialized dataset of observations
+        tdf = raw_dataset.map(_parse_function)
+        
+        # if we shuffle
+        if shuffle:
+            tdf = tdf.shuffle(2048, seed=1337)
+        
+        return tdf.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     
-    def get_tensorflow_dataset(self, data, input_names, response, run_forever, time_window, hp, shuffle=None):
+    def get_tensorflow_dataset(
+        self, 
+        data, 
+        input_names, 
+        response,
+        time_window, 
+        hp, 
+        shuffle=None, 
+        name='testing',
+        reinit=True
+    ):
+        # we may have tuning parameters
         config = self.get_parameters(hp)
         
         # option added to not shuffle if we want to do inference
         if shuffle is not None:
             config['shuffle'] = shuffle
         
-        tdf = self.__get_tensorflow_generator(
+        return self.__get_tensorflow_generator(
             data, 
             input_names, 
             response, 
-            run_forever=run_forever,
             time_window=time_window,
+            name=name,
+            reinit=reinit,
             **config
         )
-        
-        return tdf.batch(config['batch_size']).prefetch(tf.data.AUTOTUNE)
     
     def get_training_tensorflow_dataset(self, input_names, response, time_window, hp):
-        return self.get_tensorflow_dataset(self.training_data, input_names, response, True, time_window, hp)
+        return self.get_tensorflow_dataset(
+            self.training_data, 
+            input_names, 
+            response, 
+            time_window, 
+            hp, 
+            name='training', 
+            reinit=False
+        )
     
     def get_validation_tensorflow_dataset(self, input_names, response, time_window, hp):
-        return self.get_tensorflow_dataset(self.validation_data, input_names, response, True, time_window, hp)
+        return self.get_tensorflow_dataset(
+            self.validation_data, 
+            input_names, 
+            response, 
+            time_window, 
+            hp, 
+            name='validation', 
+            reinit=False
+        )

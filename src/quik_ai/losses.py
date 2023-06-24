@@ -8,10 +8,11 @@ class LogProbLoss(tf.keras.losses.Loss):
         self.response_noise = response_noise
         self.log_response = log_response
 
-    def call(self, response, model, w=None):
-        response = tf.cast(response, tf.float32) + tf.random.uniform(tf.shape(response), -self.response_noise, self.response_noise)
+    def call(self, response, model):
+        response = tf.cast(tf.reshape(response, tf.shape(model)), tf.float32)
+        response = response + tf.random.uniform(tf.shape(response), -self.response_noise, self.response_noise)
         response = tf.math.log(tf.math.maximum(response,1.0)) if self.log_response else response
-        return -model.log_prob(response) if w is None else -model.log_prob(response) * w
+        return -model.log_prob(response)
     
     def get_config(self):
         config = super().get_config()

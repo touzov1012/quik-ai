@@ -6,6 +6,16 @@ from quik_ai import metrics
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+losses_dictionary = {
+    'mean_squared_error' : tf.keras.losses.MeanSquaredError,
+    'log_prob' : losses.LogProbLoss,
+}
+
+metrics_dictionary = {
+    'mean_squared_error' : metrics.MeanSquaredErrorMetric,
+    'log_prob' : metrics.LogProbMetric,
+}
+
 class Head(tuning.Tunable):
     def __init__(
         self, 
@@ -55,10 +65,10 @@ class Regression(Head):
         return self.loss_name
     
     def loss(self):
-        return self.loss_name
+        return losses_dictionary[self.loss_name]()
     
     def metrics(self):
-        return self.loss_name
+        return metrics_dictionary[self.loss_name]()
 
 class Logistic(Head):
     def __init__(self, event_size, sparse_response=True, multi_label=False, name='Logistic', **kwargs):
@@ -89,11 +99,11 @@ class Logistic(Head):
     
     def metrics(self):
         if self.sparse_response:
-            return tf.keras.metrics.SparseCategoricalCrossentropy(from_logits=True)
+            return [tf.keras.metrics.SparseCategoricalCrossentropy(from_logits=True), 'sparse_categorical_accuracy']
         elif self.multi_label:
-            return tf.keras.metrics.BinaryCrossentropy(from_logits=True)
+            return [tf.keras.metrics.BinaryCrossentropy(from_logits=True), 'binary_accuracy']
         else:
-            return tf.keras.metrics.CategoricalCrossentropy(from_logits=True)
+            return [tf.keras.metrics.CategoricalCrossentropy(from_logits=True), 'categorical_accuracy']
         
 class GaussianMixture(Head):
     def __init__(

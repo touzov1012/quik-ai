@@ -30,6 +30,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         time_dropout=0.05,
         seed=None,
         run_eagerly=None,
+        working_dir='./tmp', 
         **kwargs
     ):
         kt.HyperModel.__init__(self, name, **kwargs)
@@ -45,6 +46,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         self.time_dropout = time_dropout
         self.seed = seed
         self.run_eagerly = run_eagerly
+        self.working_dir = working_dir
     
     @classmethod
     def load(cls, filepath='./model'):
@@ -246,7 +248,6 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         fit_kwargs = dict(
             steps_per_epoch=self.driver.get_training_steps_per_epoch(hp), 
             validation_data=self.driver.get_validation_tensorflow_dataset(input_names, self.response, config['time_window'], hp), 
-            validation_steps=self.driver.get_validation_steps_per_epoch(hp), 
         )
         
         # check if we have mlflow active
@@ -268,13 +269,12 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         early_stopping_tune=10, 
         early_stopping_full=10,
         full_rounds=1,
-        working_dir='./tmp', 
         tuner_params={},
         verbose=1
     ):
         
         # create working directory for the build
-        build_dir = backend.create_unique_dir(working_dir=working_dir)
+        build_dir = backend.create_unique_dir(working_dir=self.working_dir)
 
         backend.info('Checking for hyper-parameters to tune ...', verbose)
 
@@ -415,10 +415,9 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             data, 
             input_names=self.get_input_names(), 
             response=None, 
-            run_forever=False, 
             time_window=self.time_window, 
             hp=None, 
-            shuffle=False
+            shuffle=False,
         )
         
         return self.instance.predict(tdf, verbose=verbose)
@@ -434,10 +433,9 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             data, 
             input_names=self.get_input_names(), 
             response=None, 
-            run_forever=False, 
             time_window=self.time_window, 
             hp=None, 
-            shuffle=False
+            shuffle=False,
         )
         
         # get outputs for each data point
@@ -478,10 +476,9 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             data, 
             input_names=self.get_input_names(), 
             response=self.response, 
-            run_forever=False, 
             time_window=self.time_window, 
             hp=None, 
-            shuffle=False
+            shuffle=False,
         )
         
         # evalute the results
