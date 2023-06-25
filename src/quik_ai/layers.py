@@ -124,8 +124,16 @@ class HistoryDropout(base_layer.BaseRandomLayer):
             # apply the switch
             samples = []
             for out in outputs:
-                sub_sample = tf.where(sub_switchs, tf.identity(out), tf.zeros_like(out, dtype=out.dtype))
-                samples.append(tf.where(switchs, sub_sample, tf.identity(out)))
+                # broadcast to correct number of dims
+                sub_shape_new = [-1] + sub_switchs.shape.as_list()[1:] + [1] * (len(out.shape) - len(sub_switchs.shape))
+                shape_new = [-1] + switchs.shape.as_list()[1:] + [1] * (len(out.shape) - len(sub_switchs.shape))
+                
+                # broadcast the switches
+                b_sub_switch = tf.reshape(sub_switchs, sub_shape_new)
+                b_switch = tf.reshape(switchs, shape_new)
+                
+                sub_sample = tf.where(b_sub_switch, tf.identity(out), tf.zeros_like(out, dtype=out.dtype))
+                samples.append(tf.where(b_switch, sub_sample, tf.identity(out)))
             
             return samples
         

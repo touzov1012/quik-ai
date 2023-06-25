@@ -3,6 +3,7 @@ from quik_ai import layers
 from quik_ai import losses
 from quik_ai import metrics
 
+import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
@@ -52,14 +53,15 @@ class Head(tuning.Tunable):
         return self.body(inputs, **config)
 
 class Regression(Head):
-    def __init__(self, event_size=1, loss_name='mean_squared_error', name='Regression', **kwargs):
+    def __init__(self, event_shape=(1,), loss_name='mean_squared_error', name='Regression', **kwargs):
         super().__init__(name, **kwargs)
         
-        self.event_size = event_size
+        self.event_shape = event_shape
         self.loss_name = loss_name
     
     def body(self, inputs, **kwargs):
-        return tf.keras.layers.Dense(self.event_size)(inputs)
+        outputs = tf.keras.layers.Dense(np.prod(self.event_shape))(inputs)
+        return tf.reshape(outputs, (-1,) + self.event_shape)
     
     def monitor(self):
         return self.loss_name
