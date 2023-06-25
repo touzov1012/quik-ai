@@ -7,28 +7,32 @@ from keras.engine import base_layer
 from keras.utils import control_flow_util
 
 @tf.keras.utils.register_keras_serializable(package="quik_ai")
-class TimeFlatten(tf.keras.layers.Layer):
-    def __init__(self, time_steps, **kwargs):
-        super().__init__(**kwargs)
-        self.time_steps = time_steps
-
+class FeatureFlatten(tf.keras.layers.Layer):
     def call(self, inputs):
         # Get the batch size and the product of the remaining dimensions
         batch_size = tf.shape(inputs)[0]
+        features = tf.shape(inputs)[-1]
+        dim_product = tf.reduce_prod(tf.shape(inputs)[1:-1])
+
+        return tf.reshape(inputs, (batch_size, dim_product, features))
+
+    def compute_output_shape(self, input_shape):
+        dim_product = np.prod(input_shape[1:-1])
+        return (input_shape[0], dim_product, input_shape[-1])
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
+class TimeFlatten(tf.keras.layers.Layer):
+    def call(self, inputs):
+        # Get the batch size and the product of the remaining dimensions
+        batch_size = tf.shape(inputs)[0]
+        time_steps = tf.shape(inputs)[1]
         dim_product = tf.reduce_prod(tf.shape(inputs)[2:])
 
-        return tf.reshape(inputs, (batch_size, self.time_steps, dim_product))
+        return tf.reshape(inputs, (batch_size, time_steps, dim_product))
 
     def compute_output_shape(self, input_shape):
         dim_product = np.prod(input_shape[2:])
-        return (input_shape[0], self.time_steps, dim_product)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            'time_steps' : self.time_steps,
-        })
-        return config
+        return (input_shape[0], input_shape[1], dim_product)
 
 @tf.keras.utils.register_keras_serializable(package="quik_ai")
 class GaussianMixtureLayer(tf.keras.layers.Layer):

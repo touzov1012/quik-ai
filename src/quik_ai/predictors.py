@@ -100,6 +100,94 @@ class Numerical(Lambda):
         
         return tf.concat(outputs, axis=-1)
 
+class Image(Lambda):
+    def __init__(
+        self, 
+        names, 
+        height=None,
+        width=None,
+        standardize=True, 
+        mask_n=None,
+        filters=tuning.HyperInt(min_value=8, max_value=32, step=8),
+        kernel_size=tuning.HyperInt(min_value=4, max_value=8, step=2),
+        stride_rate=tuning.HyperFloat(min_value=0.0, max_value=1.0, step=0.25),
+        **kwargs
+    ):
+        super().__init__(names, lambdas=self.body, **kwargs)
+        
+        self.height = height
+        self.width = width
+        self.standardize = standardize
+        self.mask_n = mask_n
+        self.filters = filters
+        self.kernel_size = kernel_size
+        self.stride_rate = stride_rate
+    
+    def get_parameters(self, hp):
+        config = super().get_parameters(hp)
+        
+        with self._condition_on_parent(hp, 'drop', [False], scope=None) as scope:
+            config['height'] = self._get_hp(scope, 'height', hp)
+            config['width'] = self._get_hp(scope, 'width', hp)
+            config['standardize'] = self._get_hp(scope, 'standardize', hp)
+            config['filters'] = self._get_hp(scope, 'filters', hp)
+            config['kernel_size'] = self._get_hp(scope, 'kernel_size', hp)
+            config['stride_rate'] = self._get_hp(scope, 'stride_rate', hp)
+        
+        return config
+    
+    def body(self, inputs, driver, height, width, standardize, filters, kernel_size, stride_rate, **kwargs):  
+        
+        # append the output stack
+        outputs = []
+        for name in self.names:
+            outputs.append(inputs[name])
+        
+        # if for some reason we want to glue the images,
+        # treat the images as extended channels
+        outputs = tf.concat(outputs, axis=-1)
+        
+        # if we want to standardize to [0,1] range
+        if standardize:
+            outputs = tf.keras.layers.Rescaling(1./255)(outputs)
+        
+        # check the input shape size and if we have video
+        shape_size = len(outputs.shape)
+        has_time = shape_size == 5
+        if shape_size > 5 or shape_size < 4:
+            raise ValueError('Image input must have (4) dimensions without time, or (5) for video')
+        
+        # apply resizing to the frames of the video or the image
+        # if we need it, or if we want to improve performance
+        curr_height = outputs.shape[2] if has_time else outputs.shape[1]
+        curr_width = outputs.shape[3] if has_time else outputs.shape[2]
+        if height is None and width is not None:
+            height = int(np.ceil(width / curr_width * curr_height))
+        if width is None and height is not None:
+            width = int(np.ceil(height / curr_height * curr_width))
+        if height is not None and width is not None:
+            resize_layer = tf.keras.layers.Resizing(height, width)
+            resize_layer = tf.keras.layers.TimeDistributed(resize_layer) if has_time else resize_layer
+            outputs = resize_layer(outputs)
+        
+        # if we want to mask the last frame
+        if has_time and self.mask_n is not None:
+            unmasked, masked = tf.split(outputs, [-1, self.mask_n], axis=1)
+            masked = masked * 0.0
+            outputs = tf.concat([unmasked, masked], axis=1)
+        
+        # convolution for patches
+        strides = int(np.maximum(np.round(kernel_size * stride_rate), 1))
+        conv_layer = tf.keras.layers.Conv2D(filters, kernel_size, strides=strides, padding='same')
+        conv_layer = tf.keras.layers.TimeDistributed(conv_layer) if has_time else conv_layer
+        outputs = conv_layer(outputs)
+        
+        # best output shape, either flatten all the features over time, or flatten middle dims
+        outputs = layers.TimeFlatten()(outputs) if has_time else layers.FeatureFlatten()(outputs)
+        
+        # return the result
+        return outputs
+
 class Periodic(Lambda):
     def __init__(self, names, period, **kwargs):
         super().__init__(names, lambdas=self.body, **kwargs)

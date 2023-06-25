@@ -152,7 +152,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
             inputs = [tf.keras.layers.Flatten()(x) for x in inputs]
         elif time_window > 1 and len(inputs) > 0:
             # we have a time component, so we need to time flatten everything
-            inputs = [layers.TimeFlatten(time_window)(x) for x in inputs]
+            inputs = [layers.TimeFlatten()(x) for x in inputs]
         
         # if all inputs are dropped, we replace with a constant
         if not inputs:
