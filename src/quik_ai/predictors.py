@@ -138,6 +138,10 @@ class Image(Lambda):
     
     def body(self, inputs, driver, height, width, standardize, filters, kernel_size, stride_rate, **kwargs):  
         
+        # we may have negative height and width, this means do not resize
+        height = None if height is not None and height <= 0 else height
+        width = None if width is not None and width <= 0 else width
+        
         # append the output stack
         outputs = []
         for name in self.names:
@@ -151,9 +155,14 @@ class Image(Lambda):
         if standardize:
             outputs = tf.keras.layers.Rescaling(1./255)(outputs)
         
+        # we may have monochrome image, this is unrecommended
+        if outputs.shape[-1] not in (1, 3, 4):
+            outputs = tf.expand_dims(outputs, -1)
+        
         # check the input shape size and if we have video
         shape_size = len(outputs.shape)
         has_time = shape_size == 5
+        
         if shape_size > 5 or shape_size < 4:
             raise ValueError('Image input must have (4) dimensions without time, or (5) for video')
         
