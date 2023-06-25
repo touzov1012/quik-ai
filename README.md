@@ -25,6 +25,7 @@ predictors = [
     qa.predictors.Numerical('numerical'),
     qa.predictors.Categorical('categorical'),
     qa.predictors.Periodic('periodic', 24.0),
+    qa.predictors.Image('image'),
 ]
 ```
 
