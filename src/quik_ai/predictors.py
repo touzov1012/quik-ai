@@ -17,7 +17,7 @@ class Predictor(tuning.Tunable):
         })
         return config
     
-    def transform(self, inputs, driver, hp):
+    def transform(self, inputs, driver, time_window, hp):
         return None
 
 class Lambda(Predictor):
@@ -52,7 +52,7 @@ class Lambda(Predictor):
         
         return config
     
-    def transform(self, inputs, driver, hp):
+    def transform(self, inputs, driver, time_window, hp):
         config = self.get_parameters(hp)
         
         if config['drop']:
@@ -65,7 +65,7 @@ class Lambda(Predictor):
         for i in range(self.lambda_count):
             if not config['lambda_%s_drop' % i]:
                 lbda = getattr(self, 'lambda_%s' % i)
-                res.append(lbda(inputs, driver, **config))
+                res.append(lbda(inputs, driver, time_window, **config))
         
         if len(res) == 0:
             return None
@@ -85,7 +85,7 @@ class Numerical(Lambda):
         
         return config
     
-    def body(self, inputs, driver, normalize, **kwargs):  
+    def body(self, inputs, driver, time_window, normalize, **kwargs):  
         
         outputs = []
         
@@ -136,7 +136,7 @@ class Image(Lambda):
         
         return config
     
-    def body(self, inputs, driver, height, width, standardize, filters, kernel_size, stride_rate, **kwargs):  
+    def body(self, inputs, driver, time_window, height, width, standardize, filters, kernel_size, stride_rate, **kwargs):  
         
         # we may have negative height and width, this means do not resize
         height = None if height is not None and height <= 0 else height
@@ -155,16 +155,20 @@ class Image(Lambda):
         if standardize:
             outputs = tf.keras.layers.Rescaling(1./255)(outputs)
         
-        # we may have monochrome image, this is unrecommended
-        if outputs.shape[-1] not in (1, 3, 4):
+        # check the input shape size and if we have video
+        has_time = time_window > 1
+        
+        # resize if we need
+        if has_time and len(outputs.shape) != 5 or not has_time and len(outputs.shape) != 4:
             outputs = tf.expand_dims(outputs, -1)
         
-        # check the input shape size and if we have video
-        shape_size = len(outputs.shape)
-        has_time = shape_size == 5
+        # check that our video has correct dimensions
+        if has_time and len(outputs.shape) != 5:
+            raise ValueError('Image input must have (4) or (5) dimensions for video')
         
-        if shape_size > 5 or shape_size < 4:
-            raise ValueError('Image input must have (4) dimensions without time, or (5) for video')
+        # check that our image has correct dimensions
+        if not has_time and len(outputs.shape) != 4:
+            raise ValueError('Image input must have (3) or (4) dimensions for images')
         
         # apply resizing to the frames of the video or the image
         # if we need it, or if we want to improve performance
@@ -210,7 +214,7 @@ class Periodic(Lambda):
         
         return config
     
-    def body(self, inputs, driver, period, **kwargs):
+    def body(self, inputs, driver, time_window, period, **kwargs):
         outputs = [inputs[name] for name in self.names]
         
         outputs = tf.concat(outputs, axis=-1)
@@ -224,7 +228,7 @@ class TimeMasked(Lambda):
         super().__init__(names, lambdas=self.body, **kwargs)
         self.mask_n = mask_n
     
-    def body(self, inputs, driver, **kwargs):
+    def body(self, inputs, driver, time_window, **kwargs):
         outputs = [inputs[name] for name in self.names]
         
         outputs = tf.concat(outputs, axis=-1)
@@ -269,7 +273,7 @@ class Categorical(Lambda):
         
         return config
     
-    def body(self, inputs, driver, dropout, use_one_hot, embed_dim, embed_l2_regularizer, **kwargs):
+    def body(self, inputs, driver, time_window, dropout, use_one_hot, embed_dim, embed_l2_regularizer, **kwargs):
         outputs = [inputs[name] for name in self.names]
         
         # format to flat tensor for each input, this will be

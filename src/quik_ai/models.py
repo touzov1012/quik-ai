@@ -140,7 +140,7 @@ class HyperModel(kt.HyperModel, tuning.Tunable):
         # process each predictor transform
         inputs = []
         for predictor in self.predictors:
-            inputs.append(predictor.transform(input_layers, self.driver, hp))
+            inputs.append(predictor.transform(input_layers, self.driver, time_window, hp))
         
         # remove dropped inputs
         inputs = [x for x in inputs if x is not None]
