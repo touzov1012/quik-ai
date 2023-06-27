@@ -77,7 +77,14 @@ class Driver(tuning.Tunable):
         # reshape the result back to the desired shape
         entry_shape = arr[0,0].shape if not isinstance(arr[0,0], str) else ()
         result = result.reshape(*arr.shape, *entry_shape)
-
+        
+        # cast to correct dtype
+        if self.get_input_dtype(columns[0]) == tf.string:
+            result = result.astype(str)
+        else:
+            result = result.astype(np.float32)
+        
+        # return the result
         return result
     
     def get_input_dtype(self, column):
@@ -233,7 +240,7 @@ class Driver(tuning.Tunable):
                     # different fetch for time series and flat array, we may need to pad
                     # the time series if it there is not enough history
                     for key in sliced_tensors.keys():
-                        fill_type = '[UNK]' if key[0] == tf.string else 0
+                        fill_type = '[UNK]' if key[0] == tf.string else np.float32(0.0)
                         sliced_tensors[key] = backend.get_k_from_end(sliced_tensors[key], time_window, fill=fill_type)
 
                     # combine the predictor vectors
@@ -243,7 +250,7 @@ class Driver(tuning.Tunable):
                         for split in splits:
                             squeezed = np.squeeze(split, axis=(0,1)) if time_window <= 1 else np.squeeze(split, axis=1)
                             squeezed = np.reshape(squeezed, key[1])
-                            x_values.append(tf.convert_to_tensor(squeezed, dtype=key[0]))
+                            x_values.append(squeezed)
 
                     if cache['y'] is None:
                         example = self.__serialize_example(dict(zip(x_keys, x_values)))
