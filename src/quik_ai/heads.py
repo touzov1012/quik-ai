@@ -8,11 +8,13 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 losses_dictionary = {
+    'mean_absolute_error' : tf.keras.losses.MeanAbsoluteError,
     'mean_squared_error' : tf.keras.losses.MeanSquaredError,
     'log_prob' : losses.LogProbLoss,
 }
 
 metrics_dictionary = {
+    'mean_absolute_error' : metrics.MeanAbsoluteErrorMetric,
     'mean_squared_error' : metrics.MeanSquaredErrorMetric,
     'log_prob' : metrics.LogProbMetric,
 }

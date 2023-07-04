@@ -1,6 +1,32 @@
 import tensorflow as tf
 
 @tf.keras.utils.register_keras_serializable(package="quik_ai")
+class MeanAbsoluteErrorMetric(tf.keras.metrics.Metric):
+    def __init__(self, name='mean_absolute_error', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.total = self.add_weight(name='total', initializer='zeros')
+        self.count = self.add_weight(name='count', initializer='zeros')
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        y_true = tf.reshape(y_true, tf.shape(y_pred))
+        abs_error = tf.math.abs(y_true - y_pred)
+        if sample_weight is not None:
+            sample_weight = tf.cast(sample_weight, y_true.dtype)
+            abs_error = tf.multiply(abs_error, sample_weight)
+        num_values = tf.cast(tf.size(y_true), self.dtype)
+        
+        self.total.assign_add(tf.reduce_sum(abs_error))
+        self.count.assign_add(num_values)
+
+    def result(self):
+        return tf.math.divide_no_nan(self.total, self.count)
+
+    def reset_state(self):
+        # The state of the metric will be reset at the start of each epoch.
+        self.total.assign(0.)
+        self.count.assign(0.)
+
+@tf.keras.utils.register_keras_serializable(package="quik_ai")
 class MeanSquaredErrorMetric(tf.keras.metrics.Metric):
     def __init__(self, name='mean_squared_error', **kwargs):
         super().__init__(name=name, **kwargs)

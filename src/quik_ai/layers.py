@@ -38,9 +38,10 @@ class GaussianMixtureLayer(tf.keras.layers.Layer):
         super().__init__(**kwargs)
         self.num_components = num_components
         self.event_shape = event_shape
+        self.tfp_layer = tfp.layers.MixtureNormal(self.num_components, self.event_shape)
 
     def call(self, inputs):
-        return tfp.layers.MixtureNormal(self.num_components, self.event_shape)(inputs)
+        return self.tfp_layer(inputs)
 
     def get_config(self):
         config = super().get_config()
